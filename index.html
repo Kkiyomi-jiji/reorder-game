@@ -2,37 +2,26 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>並べ替え（語順）ゲーム</title>
   <style>
-    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 16px; }
-    .wrap { max-width: 900px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 12px; }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-    button { padding: 10px 12px; font-size: 14px; }
-    .chip {
-      padding: 10px 12px; border: 1px solid #ccc; border-radius: 999px;
-      background: #fff; cursor: grab; user-select: none;
-    }
-    .chip:active { cursor: grabbing; }
-    .zone {
-      min-height: 64px; padding: 12px; border: 2px dashed #bbb; border-radius: 12px;
-      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
-      background: #fafafa;
-    }
-    .hint { color: #666; font-size: 13px; }
-    .status { font-weight: 700; }
-    .ok { color: #0a7; }
-    .ng { color: #d33; }
-    .card { border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-top: 12px; }
-    .metrics { display:flex; gap:16px; flex-wrap:wrap; margin-top: 8px; }
-    .metric { padding: 8px 10px; border: 1px solid #eee; border-radius: 10px; background:#fff; }
-    .result {
-      margin-top: 16px; padding: 14px; border: 2px solid #ddd; border-radius: 14px; background: #fff;
-    }
-    .result h2 { margin: 0 0 8px; font-size: 18px; }
-    .big { font-size: 20px; font-weight: 800; }
-    .mono { font-variant-numeric: tabular-nums; }
+    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:16px}
+    .wrap{max-width:920px;margin:0 auto}
+    h1{font-size:20px;margin:0 0 12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    button{padding:10px 12px;font-size:14px}
+    .zone{min-height:68px;padding:12px;border:2px dashed #bbb;border-radius:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fafafa}
+    .chip{padding:10px 12px;border:1px solid #ccc;border-radius:999px;background:#fff;cursor:grab;user-select:none}
+    .chip:active{cursor:grabbing}
+    .card{border:1px solid #eee;border-radius:12px;padding:12px;margin-top:12px;background:#fff}
+    .hint{color:#666;font-size:13px}
+    .status{font-weight:800}
+    .ok{color:#0a7}
+    .ng{color:#d33}
+    .metrics{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+    .metric{padding:8px 10px;border:1px solid #eee;border-radius:10px;background:#fff}
+    code{background:#f4f4f4;padding:2px 6px;border-radius:6px}
+    .small{font-size:12px;color:#666}
   </style>
 </head>
 <body>
@@ -48,12 +37,12 @@
 
     <div class="card">
       <div class="hint">上：単語カード（ここから下へドラッグ）</div>
-      <div class="zone" id="bank" aria-label="単語カード"></div>
+      <div class="zone" id="bank"></div>
     </div>
 
     <div class="card">
       <div class="hint">下：あなたの答え（ここに並べる）</div>
-      <div class="zone" id="answer" aria-label="答え"></div>
+      <div class="zone" id="answer"></div>
     </div>
 
     <div class="card">
@@ -61,263 +50,306 @@
         セット：<b id="setName"></b> ／ 問題 <span id="qno"></span> / <span id="qtotal"></span>
       </div>
       <div class="metrics">
-        <div class="metric">時間：<span class="mono" id="time">00:00</span></div>
+        <div class="metric">時間：<span id="time">00:00</span></div>
         <div class="metric">ミス：<span id="miss">0</span></div>
         <div class="metric">正解：<span id="done">0</span></div>
       </div>
-      <div class="hint">※ タップでも移動できます（iPadで便利）</div>
-      <div class="hint">※ URLの末尾で切替： <code>?set=program1</code> / <code>?set=program2</code></div>
+      <div class="small">
+        URLで切替：<code>?set=program1</code> / <code>?set=program2</code>
+      </div>
     </div>
 
-    <div class="result" id="result" style="display:none;">
-      <h2>結果（スクショして提出）</h2>
-      <div class="big">✅ 全問クリア！</div>
-      <div style="margin-top:10px;">
-        時間：<span class="big mono" id="rTime"></span><br/>
-        ミス：<span class="big" id="rMiss"></span><br/>
-        正解：<span class="big" id="rDone"></span> / <span class="big" id="rTotal"></span>
-      </div>
-      <div class="hint" style="margin-top:8px;">
-        ※ 出席番号やニックネームは、Classroomの提出コメントに書くと楽です。
-      </div>
+    <div class="card" id="debugBox" style="display:none;">
+      <div class="hint">読み込み状況（トラブル時用）</div>
+      <pre id="debug" style="white-space:pre-wrap;margin:8px 0 0;"></pre>
     </div>
   </div>
 
 <script>
-  // ★ここに「新しいスプレッドシートのCSV URL」を貼る
-  const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ278hGBFJt_7E_uJlpS-tYk3UveGQyIkbcBBFChWrjri_dyR_RdmKFhhPJohPiGQhk9Ww2c6Oaopx1/pub?output=csv
-";
+/** ★あなたのCSV（これが正しい形） */
+const CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ278hGBFJt_7E_uJlpS-tYk3UveGQyIkbcBBFChWrjri_dyR_RdmKFhhPJohPiGQhk9Ww2c6Oaopx1/pub?output=csv";
 
-  // --------- ここから下は触らなくてOK ---------
-  const params = new URLSearchParams(location.search);
-  const SET = params.get("set") || "program1";
+/** ======= ここから下は基本触らない ======= */
+const params = new URLSearchParams(location.search);
+const SET = (params.get("set") || "program1").trim();
 
-  let QUESTIONS = [];
-  let index = 0;
-  let doneCount = 0;
-  let missCount = 0;
+const bank = document.getElementById("bank");
+const answer = document.getElementById("answer");
+const statusEl = document.getElementById("status");
+const setNameEl = document.getElementById("setName");
+const qnoEl = document.getElementById("qno");
+const qtotalEl = document.getElementById("qtotal");
+const timeEl = document.getElementById("time");
+const missEl = document.getElementById("miss");
+const doneEl = document.getElementById("done");
 
-  // Timer
-  let startAt = null;
-  let timerId = null;
+const debugBox = document.getElementById("debugBox");
+const debugEl = document.getElementById("debug");
 
-  const bank = document.getElementById("bank");
-  const answer = document.getElementById("answer");
-  const statusEl = document.getElementById("status");
-  const qnoEl = document.getElementById("qno");
-  const qtotalEl = document.getElementById("qtotal");
-  const setNameEl = document.getElementById("setName");
+let QUESTIONS = [];
+let index = 0;
+let miss = 0;
+let done = 0;
 
-  const timeEl = document.getElementById("time");
-  const missEl = document.getElementById("miss");
-  const doneEl = document.getElementById("done");
+let startAt = null;
+let timerId = null;
 
-  const resultBox = document.getElementById("result");
-  const rTime = document.getElementById("rTime");
-  const rMiss = document.getElementById("rMiss");
-  const rDone = document.getElementById("rDone");
-  const rTotal = document.getElementById("rTotal");
+function dbg(msg){
+  debugBox.style.display = "block";
+  debugEl.textContent += msg + "\n";
+}
 
-  function parseCSV(text) {
-    // 簡易CSV（カンマを含まない前提：set,sentence）
-    const lines = text.trim().split(/\r?\n/);
-    const header = lines.shift(); // set,sentence
-    const rows = [];
-    for (const line of lines) {
-      const parts = line.split(",");
-      const set = (parts[0] || "").trim();
-      const sentence = parts.slice(1).join(",").trim(); // 念のため残りを結合
-      if (set && sentence) rows.push({ set, sentence });
-    }
-    return rows;
+function formatTime(ms){
+  const s = Math.floor(ms/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,"0");
+  const ss = String(s%60).padStart(2,"0");
+  return `${mm}:${ss}`;
+}
+
+function startTimerOnce(){
+  if(startAt !== null) return;
+  startAt = Date.now();
+  timerId = setInterval(()=> {
+    timeEl.textContent = formatTime(Date.now() - startAt);
+  }, 250);
+}
+
+function stopTimer(){
+  if(timerId) clearInterval(timerId);
+  timerId = null;
+}
+
+function shuffle(arr){
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
   }
+  return a;
+}
 
-  async function loadQuestions() {
-    setNameEl.textContent = SET;
+function tokenize(sentence){
+  return sentence.trim().split(/\s+/);
+}
 
-    if (!CSV_URL || CSV_URL.includes("PASTE_CSV_URL_HERE")) {
-      statusEl.textContent = "CSV_URLが未設定です（index.htmlのCSV_URLに貼ってください）";
+/** RFC4180っぽいCSVパーサ（2列想定：set,sentence） */
+function parseCSV(text){
+  // BOM除去
+  text = text.replace(/^\uFEFF/, "");
+  const rows = [];
+  let i = 0;
+  let field = "";
+  let inQuotes = false;
+  const pushField = (arr) => { arr.push(field); field = ""; };
+  let current = [];
+
+  while(i < text.length){
+    const c = text[i];
+
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      } else {
+        field += c; i++; continue;
+      }
+    } else {
+      if(c === '"'){ inQuotes = true; i++; continue; }
+      if(c === ','){ pushField(current); i++; continue; }
+      if(c === '\r'){ i++; continue; }
+      if(c === '\n'){
+        pushField(current);
+        rows.push(current);
+        current = [];
+        i++; continue;
+      }
+      field += c; i++; continue;
+    }
+  }
+  // last line
+  pushField(current);
+  if(current.length > 1 || current[0].trim() !== "") rows.push(current);
+
+  // 1行目ヘッダー想定
+  if(rows.length > 0) rows.shift();
+
+  // 正規化
+  return rows
+    .filter(r => r.length >= 2)
+    .map(r => ({
+      set: String(r[0] ?? "").trim(),
+      sentence: String(r.slice(1).join(",") ?? "").trim()
+    }))
+    .filter(r => r.set && r.sentence);
+}
+
+async function loadQuestions(){
+  setNameEl.textContent = SET;
+
+  try{
+    // キャッシュ回避
+    const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
+    const res = await fetch(url, { cache: "no-store" });
+
+    if(!res.ok){
+      statusEl.textContent = "CSVを読み込めません（公開設定を確認）";
       statusEl.className = "status ng";
+      dbg("fetch failed: " + res.status + " " + res.statusText);
       return;
     }
 
-    const res = await fetch(CSV_URL, { cache: "no-store" });
     const text = await res.text();
     const rows = parseCSV(text);
 
+    dbg("SET = " + SET);
+    dbg("rows total = " + rows.length);
+    dbg("first rows sample:\n" + rows.slice(0,5).map(r => `${r.set} | ${r.sentence}`).join("\n"));
+
     QUESTIONS = rows.filter(r => r.set === SET).map(r => r.sentence);
 
-    if (QUESTIONS.length === 0) {
-      statusEl.textContent = `セット「${SET}」の文がありません。スプレッドシートのset列を確認してください。`;
+    qtotalEl.textContent = String(QUESTIONS.length);
+
+    if(QUESTIONS.length === 0){
+      statusEl.textContent = `セット「${SET}」が0件です（set列の文字が一致しているか確認）`;
       statusEl.className = "status ng";
+      dbg("No questions matched. Check spreadsheet set column exactly: program1 / program2");
       return;
     }
 
-    qtotalEl.textContent = QUESTIONS.length;
-    rTotal.textContent = QUESTIONS.length;
-
     loadQuestion();
+
+  }catch(e){
+    statusEl.textContent = "読み込みエラー（CSVリンクや公開設定を確認）";
+    statusEl.className = "status ng";
+    dbg("exception: " + (e?.message || e));
+  }
+}
+
+function clearZones(){
+  bank.innerHTML = "";
+  answer.innerHTML = "";
+  statusEl.textContent = "";
+  statusEl.className = "status";
+}
+
+function makeChip(text){
+  const el = document.createElement("div");
+  el.className = "chip";
+  el.textContent = text;
+  el.draggable = true;
+
+  el.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", el.dataset.id);
+    startTimerOnce();
+  });
+
+  el.addEventListener("click", () => {
+    startTimerOnce();
+    if(el.parentElement?.id === "bank") answer.appendChild(el);
+    else bank.appendChild(el);
+  });
+
+  return el;
+}
+
+function enableDrop(zone){
+  zone.addEventListener("dragover", (e) => e.preventDefault());
+  zone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    const id = e.dataTransfer.getData("text/plain");
+    const chip = document.querySelector(`[data-id="${id}"]`);
+    if(chip) zone.appendChild(chip);
+    startTimerOnce();
+  });
+}
+
+enableDrop(bank);
+enableDrop(answer);
+
+function loadQuestion(){
+  clearZones();
+  qnoEl.textContent = String(index + 1);
+
+  const tokens = tokenize(QUESTIONS[index]);
+  const mixed = shuffle(tokens);
+
+  mixed.forEach((t, k) => {
+    const chip = makeChip(t);
+    chip.dataset.id = `${index}-${k}-${Math.random().toString(16).slice(2)}`;
+    bank.appendChild(chip);
+  });
+}
+
+function currentAnswer(){
+  return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ").trim();
+}
+
+document.getElementById("btnCheck").addEventListener("click", () => {
+  if(QUESTIONS.length === 0) return;
+  const correct = QUESTIONS[index].trim();
+  const ans = currentAnswer();
+
+  if(!ans){
+    statusEl.textContent = "下に並べてから答え合わせしてね。";
+    statusEl.className = "status ng";
+    return;
   }
 
-  function tokenize(sentence) {
-    return sentence.trim().split(/\s+/);
+  if(ans === correct){
+    statusEl.textContent = "正解！🎉";
+    statusEl.className = "status ok";
+  }else{
+    miss++;
+    missEl.textContent = String(miss);
+    statusEl.textContent = "まだちがうよ。もう一回！";
+    statusEl.className = "status ng";
+  }
+});
+
+document.getElementById("btnReset").addEventListener("click", () => {
+  [...answer.querySelectorAll(".chip")].forEach(chip => bank.appendChild(chip));
+  statusEl.textContent = "";
+  statusEl.className = "status";
+});
+
+document.getElementById("btnNext").addEventListener("click", () => {
+  if(QUESTIONS.length === 0) return;
+
+  // 正解していたら正解数カウント
+  const correct = QUESTIONS[index].trim();
+  const ans = currentAnswer();
+  if(ans === correct){
+    done++;
+    doneEl.textContent = String(done);
   }
 
-  function shuffle(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
-  }
-
-  function formatTime(ms) {
-    const s = Math.floor(ms / 1000);
-    const mm = String(Math.floor(s / 60)).padStart(2, "0");
-    const ss = String(s % 60).padStart(2, "0");
-    return `${mm}:${ss}`;
-  }
-
-  function startTimerOnce() {
-    if (startAt !== null) return;
-    startAt = Date.now();
-    timerId = setInterval(() => {
-      timeEl.textContent = formatTime(Date.now() - startAt);
-    }, 250);
-  }
-
-  function stopTimer() {
-    if (timerId) clearInterval(timerId);
-    timerId = null;
-  }
-
-  function clearZones() {
-    bank.innerHTML = "";
-    answer.innerHTML = "";
-    statusEl.textContent = "";
-    statusEl.className = "status";
-  }
-
-  function makeChip(text) {
-    const el = document.createElement("div");
-    el.className = "chip";
-    el.textContent = text;
-    el.draggable = true;
-
-    el.addEventListener("dragstart", (e) => {
-      e.dataTransfer.setData("application/x-chip-id", el.dataset.id);
-      startTimerOnce();
-    });
-
-    // タップ移動（iPad便利）
-    el.addEventListener("click", () => {
-      startTimerOnce();
-      const parent = el.parentElement?.id;
-      if (parent === "bank") answer.appendChild(el);
-      else bank.appendChild(el);
-    });
-
-    return el;
-  }
-
-  function enableDrop(zone) {
-    zone.addEventListener("dragover", (e) => e.preventDefault());
-    zone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      const chipId = e.dataTransfer.getData("application/x-chip-id");
-      const chip = document.querySelector(`[data-id="${chipId}"]`);
-      if (chip) zone.appendChild(chip);
-      startTimerOnce();
-    });
-  }
-
-  enableDrop(bank);
-  enableDrop(answer);
-
-  function loadQuestion() {
-    clearZones();
-    resultBox.style.display = "none";
-    qnoEl.textContent = (index + 1);
-
-    const tokens = tokenize(QUESTIONS[index]);
-    const mixed = shuffle(tokens);
-
-    mixed.forEach((t, i) => {
-      const chip = makeChip(t);
-      chip.dataset.id = `${index}-${i}-${Math.random().toString(16).slice(2)}`;
-      bank.appendChild(chip);
-    });
-  }
-
-  function currentAnswer() {
-    return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ");
-  }
-
-  function showResult() {
+  // 全問正解に到達したら終了（doneが問題数に達したら）
+  if(done >= QUESTIONS.length){
     stopTimer();
-    const totalTime = Date.now() - startAt;
-    const timeStr = formatTime(totalTime);
-
-    rTime.textContent = timeStr;
-    rMiss.textContent = String(missCount);
-    rDone.textContent = String(doneCount);
-
-    resultBox.style.display = "block";
-    resultBox.scrollIntoView({ behavior: "smooth", block: "start" });
+    statusEl.textContent = `全問クリア！時間 ${timeEl.textContent} / ミス ${miss}`;
+    statusEl.className = "status ok";
+    return;
   }
 
-  document.getElementById("btnCheck").addEventListener("click", () => {
-    const correct = QUESTIONS[index].trim();
-    const ans = currentAnswer().trim();
+  // 次の問題へ（ループ）
+  index = (index + 1) % QUESTIONS.length;
+  loadQuestion();
+});
 
-    if (!ans) {
-      statusEl.textContent = "下に並べてから答え合わせしてね。";
-      statusEl.className = "status ng";
-      return;
-    }
-
-    if (ans === correct) {
-      statusEl.textContent = "正解！🎉 次へを押してね。";
-      statusEl.className = "status ok";
-    } else {
-      missCount++;
-      missEl.textContent = String(missCount);
-      statusEl.textContent = "まだちがうよ。もう一回！";
-      statusEl.className = "status ng";
-    }
-  });
-
-  document.getElementById("btnReset").addEventListener("click", () => {
-    [...answer.querySelectorAll(".chip")].forEach(chip => bank.appendChild(chip));
-    statusEl.textContent = "";
-    statusEl.className = "status";
-  });
-
-  document.getElementById("btnNext").addEventListener("click", () => {
-    const correct = QUESTIONS[index].trim();
-    const ans = currentAnswer().trim();
-    if (ans === correct) {
-      doneCount++;
-      doneEl.textContent = String(doneCount);
-    }
-
-    if (doneCount >= QUESTIONS.length) {
-      showResult();
-      return;
-    }
-
-    index = (index + 1) % QUESTIONS.length;
-    loadQuestion();
-  });
-
-  // 初期表示
+(async function init(){
+  setNameEl.textContent = SET;
   missEl.textContent = "0";
   doneEl.textContent = "0";
   timeEl.textContent = "00:00";
+  startAt = null;
+  if(timerId) clearInterval(timerId);
+  timerId = null;
 
-  loadQuestions();
+  await loadQuestions();
+})();
 </script>
 </body>
 </html>
+
 
