@@ -344,12 +344,21 @@ document.getElementById("btnNext").addEventListener("click", () => {
   }
 
   // 全問正解に到達したら終了（doneが問題数に達したら）
-  if(done >= QUESTIONS.length){
-    stopTimer();
-    statusEl.textContent = `全問クリア！時間 ${timeEl.textContent} / ミス ${miss}`;
-    statusEl.className = "status ok";
-    return;
-  }
+ function showSelector(){
+  document.body.innerHTML = `
+    <div style="font-family:sans-serif;text-align:center;margin-top:60px">
+      <h1>セットを選んでください</h1>
+      <div style="margin-top:30px;display:flex;flex-direction:column;gap:15px;max-width:300px;margin-left:auto;margin-right:auto;">
+        
+        <button onclick="location.search='?set=program1'" style="padding:15px;font-size:18px;">program1</button>
+        
+        <button onclick="location.search='?set=program2'" style="padding:15px;font-size:18px;">program2</button>
+        
+      </div>
+    </div>
+  `;
+}
+
 
   // 次の問題へ（ループ）
   index = (index + 1) % QUESTIONS.length;
@@ -370,6 +379,7 @@ document.getElementById("btnNext").addEventListener("click", () => {
 </script>
 </body>
 </html>
+
 
 
 
