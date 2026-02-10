@@ -72,7 +72,26 @@ const CSV_URL =
 
 /** ======= ここから下は基本触らない ======= */
 const params = new URLSearchParams(location.search);
-const SET = (params.get("set") || "program1").trim();
+let SET = params.get("set");
+
+if(!SET){
+  showSelector();
+}
+function showSelector(){
+  document.body.innerHTML = `
+    <div style="font-family:sans-serif;text-align:center;margin-top:60px">
+      <h1>セットを選んでください</h1>
+      <div style="margin-top:30px;display:flex;flex-direction:column;gap:15px;max-width:300px;margin-left:auto;margin-right:auto;">
+        
+        <button onclick="location.search='?set=program1'" style="padding:15px;font-size:18px;">program1</button>
+        
+        <button onclick="location.search='?set=program2'" style="padding:15px;font-size:18px;">program2</button>
+        
+      </div>
+    </div>
+  `;
+}
+
 
 const bank = document.getElementById("bank");
 const answer = document.getElementById("answer");
@@ -351,5 +370,6 @@ document.getElementById("btnNext").addEventListener("click", () => {
 </script>
 </body>
 </html>
+
 
 
