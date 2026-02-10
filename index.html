@@ -27,8 +27,10 @@
     a{color:#0b57d0}
     .jpbox{margin-top:6px;padding:10px 12px;border:1px solid #eee;border-radius:12px;background:#fff}
     .jpbox b{margin-right:6px}
+    .warn{margin-top:8px;padding:10px 12px;border:1px solid #ffd4d4;background:#fff5f5;border-radius:12px;color:#b00020;line-height:1.6}
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <h1>並べ替え（語順）ゲーム</h1>
@@ -37,7 +39,8 @@
       <button id="btnCheck">答え合わせ</button>
       <button id="btnReset">リセット</button>
       <button id="btnNext">次へ</button>
-      <button id="btnToSelector">セット選択へ</button>
+      <button id="btnToSelector">選択画面に戻る</button>
+      <button id="btnToggleDebug">デバッグ</button>
       <span class="status" id="status"></span>
     </div>
 
@@ -67,9 +70,9 @@
         <div class="metric">正解：<span id="done">0</span></div>
       </div>
       <div class="small">
-        セット切替：<code>?set=program1</code> ／ <code>?set=program2</code> …
-        ｜ 宿題ページ：<code>?view=homework</code>
+        例：<code>?set=program1</code> ／ <code>?set=program2</code> ／ <code>?view=homework</code>
       </div>
+      <div class="warn" id="csvWarn" style="display:none;"></div>
     </div>
 
     <div class="card" id="debugBox" style="display:none;">
@@ -79,21 +82,29 @@
   </div>
 
 <script>
-/** ★あなたのCSV（GoogleスプレッドシートCSV公開URL） */
-const CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ278hGBFJt_7E_uJlpS-tYk3UveGQyIkbcBBFChWrjri_dyR_RdmKFhhPJohPiGQhk9Ww2c6Oaopx1/pub?output=csv";
+/** =======================
+ *  先生が触るのはここだけ
+ * ======================= */
 
-/** ★今日の宿題（ここだけ毎日変える） */
+/** ★ CSV公開URL（3列：set,sentence,ja を推奨） */
+const CSV_URL =
+  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQl__u8k5jdrWX0EeT3HLywC9xJuMEG_ayrAleSBtKde74WBk8VYqtXvSSz60LnNSp4-qUKZygr0C5E/pub?output=csv";
+
+/** ★ 今日の宿題（毎日ここだけ変更） */
 const TODAY_HOMEWORK = {
   title: "今日の宿題はこちら",
   note: "最後に出る結果をスクショして提出してね。",
   items: [
     { set: "program1", label: "宿題① program1（基本）" },
     { set: "program2", label: "宿題② program2（チャレンジ）" },
+    { set: "program3", label: "宿題③ program3（追加）" },
   ]
 };
 
-/** ======= ここから下は基本触らない ======= */
+/** =======================
+ *  ここから下は基本触らない
+ * ======================= */
+
 const params = new URLSearchParams(location.search);
 const VIEW = (params.get("view") || "").trim();   // view=homework
 let SET = (params.get("set") || "").trim();       // set=program1
@@ -113,12 +124,13 @@ const modeTag = document.getElementById("modeTag");
 const jpCard = document.getElementById("jpCard");
 const jpText = document.getElementById("jpText");
 
+const csvWarn = document.getElementById("csvWarn");
 const debugBox = document.getElementById("debugBox");
 const debugEl = document.getElementById("debug");
 
-let ALL_ROWS = [];     // CSV全行（set,sentence,ja）
-let SET_LIST = [];     // CSVから自動生成されるセット一覧
-let QUESTIONS = [];    // 今のセットの問題 [{en, ja}]
+let ALL_ROWS = [];   // [{set,en,ja}]
+let SET_LIST = [];   // ["program1","program2"...]
+let QUESTIONS = [];  // [{en,ja}]
 let index = 0;
 let miss = 0;
 let done = 0;
@@ -127,8 +139,16 @@ let startAt = null;
 let timerId = null;
 
 function dbg(msg){
-  debugBox.style.display = "block";
   debugEl.textContent += msg + "\n";
+}
+
+function showWarn(html){
+  csvWarn.style.display = "block";
+  csvWarn.innerHTML = html;
+}
+function hideWarn(){
+  csvWarn.style.display = "none";
+  csvWarn.innerHTML = "";
 }
 
 function formatTime(ms){
@@ -164,7 +184,10 @@ function tokenize(sentence){
   return sentence.trim().split(/\s+/);
 }
 
-/** RFC4180っぽいCSVパーサ（3列想定：set,sentence,ja） */
+/** CSVパーサ（3列：set,sentence,ja）
+ *  ※ jaが無い場合でも動く（空扱い）
+ *  ※ 3列目以降は日本語として結合（カンマ含みOK）
+ */
 function parseCSV(text){
   text = text.replace(/^\uFEFF/, "");
   const rows = [];
@@ -199,21 +222,22 @@ function parseCSV(text){
   pushField(current);
   if(current.length > 1 || (current[0] ?? "").trim() !== "") rows.push(current);
 
-  if(rows.length > 0) rows.shift(); // header
+  // headerを捨てる
+  if(rows.length > 0) rows.shift();
 
   return rows
     .filter(r => r.length >= 2)
     .map(r => ({
       set: String(r[0] ?? "").trim(),
       en:  String(r[1] ?? "").trim(),
-      ja:  String(r.slice(2).join(",") ?? "").trim() // 3列目以降は日本語（カンマ含みOK）
+      ja:  String(r.slice(2).join(",") ?? "").trim()
     }))
     .filter(r => r.set && r.en);
 }
 
 /** 画面遷移 */
 function goSelector(){
-  location.href = location.pathname;
+  location.href = location.pathname; // ?set= を消してトップへ
 }
 function goHomeworkPage(){
   location.href = location.pathname + "?view=homework";
@@ -232,14 +256,24 @@ function showSelector(){
   ).join("");
 
   document.body.innerHTML = `
-    <div style="font-family:system-ui;max-width:520px;margin:70px auto 0;padding:0 16px;text-align:center">
-      <h1 style="font-size:22px;margin:0 0 18px">セットを選んでください</h1>
-      <div style="display:flex;flex-direction:column;gap:12px">${buttons || "<div style='color:#d33'>セットが見つかりません（CSVのset列を確認）</div>"}</div>
+    <div style="font-family:system-ui;max-width:640px;margin:70px auto 0;padding:0 16px;text-align:center">
+      <h1 style="font-size:22px;margin:0 0 12px">セットを選んでください</h1>
+      <div style="color:#666;font-size:13px;margin-bottom:14px">
+        （CSVに入っているセット：${escapeHtml(SET_LIST.join(", ") || "なし")}）
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${buttons || "<div style='color:#b00020'>セットが見つかりません。CSVの公開設定／URLを確認してください。</div>"}
+      </div>
+
       <div style="margin-top:18px">
         <button style="padding:12px 14px;font-size:14px" onclick="goHomeworkPage()">今日の宿題はこちら</button>
       </div>
-      <div style="margin-top:14px;color:#666;font-size:13px">
-        ※ セットは <b>スプレッドシートのset列</b> に書くだけで自動で増えます（コード修正ゼロ）。
+
+      <div style="margin-top:14px;color:#666;font-size:13px;line-height:1.6;text-align:left;border:1px solid #eee;border-radius:12px;padding:12px">
+        <b>先生メモ：</b><br>
+        ・セットは <b>スプレッドシートのset列</b> を増やすだけで自動で追加されます（コード修正ゼロ）<br>
+        ・日本語訳は <b>ja列</b> に入れると表示されます（空なら非表示）
       </div>
     </div>
   `;
@@ -329,7 +363,6 @@ function loadQuestion(){
   clearZones();
   qnoEl.textContent = String(index + 1);
 
-  // 日本語訳表示
   const jp = (QUESTIONS[index]?.ja || "").trim();
   if(jp){
     jpCard.style.display = "block";
@@ -376,18 +409,23 @@ function applySet(){
   qtotalEl.textContent = String(QUESTIONS.length);
 
   if(QUESTIONS.length === 0){
-    statusEl.textContent = `セット「${SET}」が0件です（set列の文字が一致しているか確認）`;
+    statusEl.textContent = `セット「${SET}」が0件です`;
     statusEl.className = "status ng";
+    showWarn(`
+      <b>このセットが見つかりません。</b><br>
+      CSV_URLの中に「${escapeHtml(SET)}」の行がありません。<br>
+      スプレッドシート側で「ウェブに公開」を停止→再公開すると直ることが多いです。
+    `);
     return false;
   }
+
+  hideWarn();
   loadQuestion();
   return true;
 }
 
-/** 終了画面（②：終わったら選択画面に戻れる） */
 function showFinish(){
   stopTimer();
-
   const totalTime = (startAt === null) ? "00:00" : timeEl.textContent;
   const html = `
     <div style="margin-top:10px;line-height:1.7">
@@ -408,8 +446,11 @@ function showFinish(){
   statusEl.className = "status ok";
 }
 
-document.getElementById("btnToSelector").addEventListener("click", () => {
-  goSelector();
+/** ボタン */
+document.getElementById("btnToSelector").addEventListener("click", () => goSelector());
+
+document.getElementById("btnToggleDebug").addEventListener("click", () => {
+  debugBox.style.display = (debugBox.style.display === "none") ? "block" : "none";
 });
 
 document.getElementById("btnCheck").addEventListener("click", () => {
@@ -447,13 +488,11 @@ document.getElementById("btnNext").addEventListener("click", () => {
   const correct = QUESTIONS[index].en.trim();
   const ans = currentAnswer();
 
-  // 正解していたら正解数カウント
   if(ans === correct){
     done++;
     doneEl.textContent = String(done);
   }
 
-  // 全問正解に到達したら終了
   if(done >= QUESTIONS.length){
     showFinish();
     return;
@@ -463,6 +502,7 @@ document.getElementById("btnNext").addEventListener("click", () => {
   loadQuestion();
 });
 
+/** 初期化 */
 (async function init(){
   // 宿題ページ
   if(IS_HOMEWORK_MODE){
@@ -470,42 +510,50 @@ document.getElementById("btnNext").addEventListener("click", () => {
     return;
   }
 
+  // 初期表示
   missEl.textContent = "0";
   doneEl.textContent = "0";
   timeEl.textContent = "00:00";
   startAt = null;
   if(timerId) clearInterval(timerId);
   timerId = null;
+  debugEl.textContent = "";
 
   try{
-    // まずCSVを読み込んで、セット一覧を自動生成
     ALL_ROWS = await fetchCSVOnce();
     SET_LIST = buildSetList(ALL_ROWS);
 
+    dbg("CSV_URL = " + CSV_URL);
     dbg("rows total = " + ALL_ROWS.length);
     dbg("sets = " + SET_LIST.join(", "));
-    dbg("sample:\n" + ALL_ROWS.slice(0,5).map(r => `${r.set} | ${r.en} | ${r.ja}`).join("\n"));
+    dbg("sample:\n" + ALL_ROWS.slice(0,10).map(r => `${r.set} | ${r.en} | ${r.ja}`).join("\n"));
 
-    // ③ setが無いなら、必ず選択画面
+    // 何も付けずに開いたら必ず選択画面
     if(!SET){
       showSelector();
       return;
     }
 
-    // setがあるなら、そのセットを開始
-    setNameEl.textContent = SET;
+    // setがあるなら開始
     const ok = applySet();
     if(!ok) return;
 
   }catch(e){
     statusEl.textContent = "読み込みエラー（CSVリンクや公開設定を確認）";
     statusEl.className = "status ng";
+    showWarn(`
+      <b>CSVが読み込めません。</b><br>
+      ・スプレッドシートが「ウェブに公開」になっているか<br>
+      ・CSV_URLが正しいか（pub?output=csv）
+    `);
     dbg("exception: " + (e?.message || e));
+    debugBox.style.display = "block";
   }
 })();
 </script>
 </body>
 </html>
+
 
 
 
