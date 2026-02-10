@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>並べ替え（語順）ゲーム</title>
+  <style>
+    body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 16px; }
+    .wrap { max-width: 900px; margin: 0 auto; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+    button { padding: 10px 12px; font-size: 14px; }
+    .chip {
+      padding: 10px 12px; border: 1px solid #ccc; border-radius: 999px;
+      background: #fff; cursor: grab; user-select: none;
+    }
+    .chip:active { cursor: grabbing; }
+    .zone {
+      min-height: 64px; padding: 12px; border: 2px dashed #bbb; border-radius: 12px;
+      display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+      background: #fafafa;
+    }
+    .hint { color: #666; font-size: 13px; }
+    .status { font-weight: 700; }
+    .ok { color: #0a7; }
+    .ng { color: #d33; }
+    .card { border: 1px solid #eee; border-radius: 12px; padding: 12px; margin-top: 12px; }
+    .metrics { display:flex; gap:16px; flex-wrap:wrap; margin-top: 8px; }
+    .metric { padding: 8px 10px; border: 1px solid #eee; border-radius: 10px; background:#fff; }
+    .result {
+      margin-top: 16px; padding: 14px; border: 2px solid #ddd; border-radius: 14px; background: #fff;
+    }
+    .result h2 { margin: 0 0 8px; font-size: 18px; }
+    .big { font-size: 20px; font-weight: 800; }
+    .mono { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>並べ替え（語順）ゲーム</h1>
+
+    <div class="row">
+      <button id="btnCheck">答え合わせ</button>
+      <button id="btnReset">リセット</button>
+      <button id="btnNext">次へ</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <div class="card">
+      <div class="hint">上：単語カード（ここから下へドラッグ）</div>
+      <div class="zone" id="bank" aria-label="単語カード"></div>
+    </div>
+
+    <div class="card">
+      <div class="hint">下：あなたの答え（ここに並べる）</div>
+      <div class="zone" id="answer" aria-label="答え"></div>
+    </div>
+
+    <div class="card">
+      <div class="hint">
+        問題 <span id="qno"></span> / <span id="qtotal"></span>
+      </div>
+      <div class="metrics">
+        <div class="metric">時間：<span class="mono" id="time">00:00</span></div>
+        <div class="metric">ミス：<span id="miss">0</span></div>
+        <div class="metric">正解：<span id="done">0</span></div>
+      </div>
+      <div class="hint">※ タップでも移動できます（iPadで便利）</div>
+    </div>
+
+    <div class="result" id="result" style="display:none;">
+      <h2>結果（スクショして提出）</h2>
+      <div class="big">✅ 全問クリア！</div>
+      <div style="margin-top:10px;">
+        時間：<span class="big mono" id="rTime"></span><br/>
+        ミス：<span class="big" id="rMiss"></span><br/>
+        正解：<span class="big" id="rDone"></span> / <span class="big" id="rTotal"></span>
+      </div>
+      <div class="hint" style="margin-top:8px;">
+        ※ 出席番号やニックネームは、Classroomの提出コメントに書くと楽です。
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ★ここに問題を追加（正解の文をそのまま書く）
+  const QUESTIONS = [
+    "I visited my grandmother yesterday.",
+    "She plays soccer after school.",
+    "We have studied English for two years."
+  ];
+
+  let index = 0;
+  let doneCount = 0;
+  let missCount = 0;
+
+  // Timer
+  let startAt = null;
+  let timerId = null;
+
+  const bank = document.getElementById("bank");
+  const answer = document.getElementById("answer");
+  const statusEl = document.getElementById("status");
+  const qnoEl = document.getElementById("qno");
+  const qtotalEl = document.getElementById("qtotal");
+
+  const timeEl = document.getElementById("time");
+  const missEl = document.getElementById("miss");
+  const doneEl = document.getElementById("done");
+
+  const resultBox = document.getElementById("result");
+  const rTime = document.getElementById("rTime");
+  const rMiss = document.getElementById("rMiss");
+  const rDone = document.getElementById("rDone");
+  const rTotal = document.getElementById("rTotal");
+
+  qtotalEl.textContent = QUESTIONS.length;
+  rTotal.textContent = QUESTIONS.length;
+
+  function tokenize(sentence) {
+    return sentence.trim().split(/\s+/);
+  }
+
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function formatTime(ms) {
+    const s = Math.floor(ms / 1000);
+    const mm = String(Math.floor(s / 60)).padStart(2, "0");
+    const ss = String(s % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  }
+
+  function startTimerOnce() {
+    if (startAt !== null) return;
+    startAt = Date.now();
+    timerId = setInterval(() => {
+      timeEl.textContent = formatTime(Date.now() - startAt);
+    }, 250);
+  }
+
+  function stopTimer() {
+    if (timerId) clearInterval(timerId);
+    timerId = null;
+  }
+
+  function clearZones() {
+    bank.innerHTML = "";
+    answer.innerHTML = "";
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  }
+
+  function makeChip(text) {
+    const el = document.createElement("div");
+    el.className = "chip";
+    el.textContent = text;
+    el.draggable = true;
+
+    el.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("application/x-chip-id", el.dataset.id);
+      startTimerOnce();
+    });
+
+    // タップ移動（iPad便利）
+    el.addEventListener("click", () => {
+      startTimerOnce();
+      const parent = el.parentElement?.id;
+      if (parent === "bank") answer.appendChild(el);
+      else bank.appendChild(el);
+    });
+
+    return el;
+  }
+
+  function enableDrop(zone) {
+    zone.addEventListener("dragover", (e) => e.preventDefault());
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const chipId = e.dataTransfer.getData("application/x-chip-id");
+      const chip = document.querySelector(`[data-id="${chipId}"]`);
+      if (chip) zone.appendChild(chip);
+      startTimerOnce();
+    });
+  }
+
+  enableDrop(bank);
+  enableDrop(answer);
+
+  function loadQuestion() {
+    clearZones();
+    resultBox.style.display = "none";
+    qnoEl.textContent = (index + 1);
+
+    const tokens = tokenize(QUESTIONS[index]);
+    const mixed = shuffle(tokens);
+
+    mixed.forEach((t, i) => {
+      const chip = makeChip(t);
+      chip.dataset.id = `${index}-${i}-${Math.random().toString(16).slice(2)}`;
+      bank.appendChild(chip);
+    });
+  }
+
+  function currentAnswer() {
+    return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ");
+  }
+
+  function showResult() {
+    stopTimer();
+    const totalTime = Date.now() - startAt;
+    const timeStr = formatTime(totalTime);
+
+    rTime.textContent = timeStr;
+    rMiss.textContent = String(missCount);
+    rDone.textContent = String(doneCount);
+
+    resultBox.style.display = "block";
+    resultBox.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  document.getElementById("btnCheck").addEventListener("click", () => {
+    const correct = QUESTIONS[index].trim();
+    const ans = currentAnswer().trim();
+
+    if (!ans) {
+      statusEl.textContent = "下に並べてから答え合わせしてね。";
+      statusEl.className = "status ng";
+      return;
+    }
+
+    if (ans === correct) {
+      statusEl.textContent = "正解！🎉 次へを押してね。";
+      statusEl.className = "status ok";
+
+      // その問題を初めて正解したらカウント
+      // （同じ問題で何度もチェックしても増えないように、Nextで進む運用）
+    } else {
+      missCount++;
+      missEl.textContent = String(missCount);
+      statusEl.textContent = "まだちがうよ。もう一回！";
+      statusEl.className = "status ng";
+    }
+  });
+
+  document.getElementById("btnReset").addEventListener("click", () => {
+    [...answer.querySelectorAll(".chip")].forEach(chip => bank.appendChild(chip));
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  });
+
+  document.getElementById("btnNext").addEventListener("click", () => {
+    // 次へ押す前に正解していたかチェック（答え合わせを押していない子対策）
+    const correct = QUESTIONS[index].trim();
+    const ans = currentAnswer().trim();
+    if (ans === correct) {
+      doneCount++;
+      doneEl.textContent = String(doneCount);
+    }
+
+    if (doneCount >= QUESTIONS.length) {
+      showResult();
+      return;
+    }
+
+    index = (index + 1) % QUESTIONS.length;
+    loadQuestion();
+  });
+
+  // 初期表示
+  missEl.textContent = "0";
+  doneEl.textContent = "0";
+  timeEl.textContent = "00:00";
+  loadQuestion();
+</script>
+</body>
+</html>
