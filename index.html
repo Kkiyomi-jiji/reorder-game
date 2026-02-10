@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>並べ替え（語順）ゲーム</title>
   <style>
-    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:16px}
-    .wrap{max-width:920px;margin:0 auto}
+    body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:16px;background:#fff}
+    .wrap{max-width:980px;margin:0 auto}
     h1{font-size:20px;margin:0 0 12px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    button{padding:10px 12px;font-size:14px}
+    button{padding:10px 12px;font-size:14px;border-radius:10px;border:1px solid #ddd;background:#fff}
+    button:hover{background:#f7f7f7}
     .zone{min-height:68px;padding:12px;border:2px dashed #bbb;border-radius:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fafafa}
     .chip{padding:10px 12px;border:1px solid #ccc;border-radius:999px;background:#fff;cursor:grab;user-select:none}
     .chip:active{cursor:grabbing}
@@ -22,6 +23,10 @@
     .metric{padding:8px 10px;border:1px solid #eee;border-radius:10px;background:#fff}
     code{background:#f4f4f4;padding:2px 6px;border-radius:6px}
     .small{font-size:12px;color:#666}
+    .pill{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:999px;background:#fff}
+    a{color:#0b57d0}
+    .jpbox{margin-top:6px;padding:10px 12px;border:1px solid #eee;border-radius:12px;background:#fff}
+    .jpbox b{margin-right:6px}
   </style>
 </head>
 <body>
@@ -32,11 +37,17 @@
       <button id="btnCheck">答え合わせ</button>
       <button id="btnReset">リセット</button>
       <button id="btnNext">次へ</button>
+      <button id="btnToSelector">セット選択へ</button>
       <span class="status" id="status"></span>
     </div>
 
+    <div class="card" id="jpCard" style="display:none;">
+      <div class="hint">日本語訳（ヒント）</div>
+      <div class="jpbox"><b>JP:</b><span id="jpText"></span></div>
+    </div>
+
     <div class="card">
-      <div class="hint">上：単語カード（ここから下へドラッグ）</div>
+      <div class="hint">上：単語カード（ここから下へドラッグ／タップでも移動）</div>
       <div class="zone" id="bank"></div>
     </div>
 
@@ -48,6 +59,7 @@
     <div class="card">
       <div class="hint">
         セット：<b id="setName"></b> ／ 問題 <span id="qno"></span> / <span id="qtotal"></span>
+        <span class="pill" id="modeTag" style="display:none;margin-left:8px;">宿題</span>
       </div>
       <div class="metrics">
         <div class="metric">時間：<span id="time">00:00</span></div>
@@ -55,43 +67,37 @@
         <div class="metric">正解：<span id="done">0</span></div>
       </div>
       <div class="small">
-        URLで切替：<code>?set=program1</code> / <code>?set=program2</code>
+        セット切替：<code>?set=program1</code> ／ <code>?set=program2</code> …
+        ｜ 宿題ページ：<code>?view=homework</code>
       </div>
     </div>
 
     <div class="card" id="debugBox" style="display:none;">
-      <div class="hint">読み込み状況（トラブル時用）</div>
+      <div class="hint">読み込み状況（困ったとき用）</div>
       <pre id="debug" style="white-space:pre-wrap;margin:8px 0 0;"></pre>
     </div>
   </div>
 
 <script>
-/** ★あなたのCSV（これが正しい形） */
+/** ★あなたのCSV（GoogleスプレッドシートCSV公開URL） */
 const CSV_URL =
   "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ278hGBFJt_7E_uJlpS-tYk3UveGQyIkbcBBFChWrjri_dyR_RdmKFhhPJohPiGQhk9Ww2c6Oaopx1/pub?output=csv";
 
+/** ★今日の宿題（ここだけ毎日変える） */
+const TODAY_HOMEWORK = {
+  title: "今日の宿題はこちら",
+  note: "最後に出る結果をスクショして提出してね。",
+  items: [
+    { set: "program1", label: "宿題① program1（基本）" },
+    { set: "program2", label: "宿題② program2（チャレンジ）" },
+  ]
+};
+
 /** ======= ここから下は基本触らない ======= */
 const params = new URLSearchParams(location.search);
-let SET = params.get("set");
-
-if(!SET){
-  showSelector();
-}
-function showSelector(){
-  document.body.innerHTML = `
-    <div style="font-family:sans-serif;text-align:center;margin-top:60px">
-      <h1>セットを選んでください</h1>
-      <div style="margin-top:30px;display:flex;flex-direction:column;gap:15px;max-width:300px;margin-left:auto;margin-right:auto;">
-        
-        <button onclick="location.search='?set=program1'" style="padding:15px;font-size:18px;">program1</button>
-        
-        <button onclick="location.search='?set=program2'" style="padding:15px;font-size:18px;">program2</button>
-        
-      </div>
-    </div>
-  `;
-}
-
+const VIEW = (params.get("view") || "").trim();   // view=homework
+let SET = (params.get("set") || "").trim();       // set=program1
+const IS_HOMEWORK_MODE = VIEW === "homework";
 
 const bank = document.getElementById("bank");
 const answer = document.getElementById("answer");
@@ -102,11 +108,17 @@ const qtotalEl = document.getElementById("qtotal");
 const timeEl = document.getElementById("time");
 const missEl = document.getElementById("miss");
 const doneEl = document.getElementById("done");
+const modeTag = document.getElementById("modeTag");
+
+const jpCard = document.getElementById("jpCard");
+const jpText = document.getElementById("jpText");
 
 const debugBox = document.getElementById("debugBox");
 const debugEl = document.getElementById("debug");
 
-let QUESTIONS = [];
+let ALL_ROWS = [];     // CSV全行（set,sentence,ja）
+let SET_LIST = [];     // CSVから自動生成されるセット一覧
+let QUESTIONS = [];    // 今のセットの問題 [{en, ja}]
 let index = 0;
 let miss = 0;
 let done = 0;
@@ -152,9 +164,8 @@ function tokenize(sentence){
   return sentence.trim().split(/\s+/);
 }
 
-/** RFC4180っぽいCSVパーサ（2列想定：set,sentence） */
+/** RFC4180っぽいCSVパーサ（3列想定：set,sentence,ja） */
 function parseCSV(text){
-  // BOM除去
   text = text.replace(/^\uFEFF/, "");
   const rows = [];
   let i = 0;
@@ -165,7 +176,6 @@ function parseCSV(text){
 
   while(i < text.length){
     const c = text[i];
-
     if(inQuotes){
       if(c === '"'){
         if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
@@ -186,63 +196,92 @@ function parseCSV(text){
       field += c; i++; continue;
     }
   }
-  // last line
   pushField(current);
-  if(current.length > 1 || current[0].trim() !== "") rows.push(current);
+  if(current.length > 1 || (current[0] ?? "").trim() !== "") rows.push(current);
 
-  // 1行目ヘッダー想定
-  if(rows.length > 0) rows.shift();
+  if(rows.length > 0) rows.shift(); // header
 
-  // 正規化
   return rows
     .filter(r => r.length >= 2)
     .map(r => ({
       set: String(r[0] ?? "").trim(),
-      sentence: String(r.slice(1).join(",") ?? "").trim()
+      en:  String(r[1] ?? "").trim(),
+      ja:  String(r.slice(2).join(",") ?? "").trim() // 3列目以降は日本語（カンマ含みOK）
     }))
-    .filter(r => r.set && r.sentence);
+    .filter(r => r.set && r.en);
 }
 
-async function loadQuestions(){
-  setNameEl.textContent = SET;
+/** 画面遷移 */
+function goSelector(){
+  location.href = location.pathname;
+}
+function goHomeworkPage(){
+  location.href = location.pathname + "?view=homework";
+}
+function goSet(setKey, homework=false){
+  const qs = new URLSearchParams();
+  qs.set("set", setKey);
+  if(homework) qs.set("hw", "1");
+  location.href = location.pathname + "?" + qs.toString();
+}
 
-  try{
-    // キャッシュ回避
-    const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-    const res = await fetch(url, { cache: "no-store" });
+/** 選択画面（CSVのset列から自動生成） */
+function showSelector(){
+  const buttons = SET_LIST.map(s =>
+    `<button style="padding:14px 16px;font-size:16px" onclick="goSet('${escapeHtml(s)}')">${escapeHtml(s)}</button>`
+  ).join("");
 
-    if(!res.ok){
-      statusEl.textContent = "CSVを読み込めません（公開設定を確認）";
-      statusEl.className = "status ng";
-      dbg("fetch failed: " + res.status + " " + res.statusText);
-      return;
-    }
+  document.body.innerHTML = `
+    <div style="font-family:system-ui;max-width:520px;margin:70px auto 0;padding:0 16px;text-align:center">
+      <h1 style="font-size:22px;margin:0 0 18px">セットを選んでください</h1>
+      <div style="display:flex;flex-direction:column;gap:12px">${buttons || "<div style='color:#d33'>セットが見つかりません（CSVのset列を確認）</div>"}</div>
+      <div style="margin-top:18px">
+        <button style="padding:12px 14px;font-size:14px" onclick="goHomeworkPage()">今日の宿題はこちら</button>
+      </div>
+      <div style="margin-top:14px;color:#666;font-size:13px">
+        ※ セットは <b>スプレッドシートのset列</b> に書くだけで自動で増えます（コード修正ゼロ）。
+      </div>
+    </div>
+  `;
+}
 
-    const text = await res.text();
-    const rows = parseCSV(text);
+/** 宿題ページ */
+function showHomework(){
+  const base = location.origin + location.pathname;
+  const items = TODAY_HOMEWORK.items.map((it, idx) => {
+    const url = base + `?set=${encodeURIComponent(it.set)}&hw=1`;
+    return `
+      <div style="border:1px solid #eee;border-radius:12px;padding:12px;text-align:left;background:#fff">
+        <div style="font-weight:800">${idx+1}. ${escapeHtml(it.label)}</div>
+        <div style="margin-top:6px">
+          <a href="${url}">${url}</a>
+        </div>
+      </div>
+    `;
+  }).join("");
 
-    dbg("SET = " + SET);
-    dbg("rows total = " + rows.length);
-    dbg("first rows sample:\n" + rows.slice(0,5).map(r => `${r.set} | ${r.sentence}`).join("\n"));
+  document.body.innerHTML = `
+    <div style="font-family:system-ui;max-width:760px;margin:40px auto 0;padding:0 16px">
+      <h1 style="font-size:22px;margin:0 0 8px">${escapeHtml(TODAY_HOMEWORK.title)}</h1>
+      <div style="color:#666;font-size:14px;margin-bottom:14px">${escapeHtml(TODAY_HOMEWORK.note)}</div>
+      <div style="display:flex;flex-direction:column;gap:12px">${items}</div>
 
-    QUESTIONS = rows.filter(r => r.set === SET).map(r => r.sentence);
+      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="goSelector()">セット選択に戻る</button>
+      </div>
 
-    qtotalEl.textContent = String(QUESTIONS.length);
+      <div style="margin-top:14px;color:#666;font-size:12px">
+        ※ 生徒にはこのページURL（<code>?view=homework</code>）を配るのが楽です。
+      </div>
+    </div>
+  `;
+}
 
-    if(QUESTIONS.length === 0){
-      statusEl.textContent = `セット「${SET}」が0件です（set列の文字が一致しているか確認）`;
-      statusEl.className = "status ng";
-      dbg("No questions matched. Check spreadsheet set column exactly: program1 / program2");
-      return;
-    }
-
-    loadQuestion();
-
-  }catch(e){
-    statusEl.textContent = "読み込みエラー（CSVリンクや公開設定を確認）";
-    statusEl.className = "status ng";
-    dbg("exception: " + (e?.message || e));
-  }
+/** 簡単エスケープ */
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
 }
 
 function clearZones(){
@@ -290,7 +329,17 @@ function loadQuestion(){
   clearZones();
   qnoEl.textContent = String(index + 1);
 
-  const tokens = tokenize(QUESTIONS[index]);
+  // 日本語訳表示
+  const jp = (QUESTIONS[index]?.ja || "").trim();
+  if(jp){
+    jpCard.style.display = "block";
+    jpText.textContent = jp;
+  }else{
+    jpCard.style.display = "none";
+    jpText.textContent = "";
+  }
+
+  const tokens = tokenize(QUESTIONS[index].en);
   const mixed = shuffle(tokens);
 
   mixed.forEach((t, k) => {
@@ -304,9 +353,68 @@ function currentAnswer(){
   return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ").trim();
 }
 
+async function fetchCSVOnce(){
+  const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
+  const res = await fetch(url, { cache: "no-store" });
+  if(!res.ok) throw new Error("fetch failed: " + res.status + " " + res.statusText);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+function buildSetList(rows){
+  return [...new Set(rows.map(r => r.set))].sort((a,b)=>a.localeCompare(b,"ja"));
+}
+
+function applySet(){
+  setNameEl.textContent = SET || "";
+  modeTag.style.display = (params.get("hw") === "1") ? "inline-block" : "none";
+
+  QUESTIONS = ALL_ROWS
+    .filter(r => r.set === SET)
+    .map(r => ({ en: r.en, ja: r.ja }));
+
+  qtotalEl.textContent = String(QUESTIONS.length);
+
+  if(QUESTIONS.length === 0){
+    statusEl.textContent = `セット「${SET}」が0件です（set列の文字が一致しているか確認）`;
+    statusEl.className = "status ng";
+    return false;
+  }
+  loadQuestion();
+  return true;
+}
+
+/** 終了画面（②：終わったら選択画面に戻れる） */
+function showFinish(){
+  stopTimer();
+
+  const totalTime = (startAt === null) ? "00:00" : timeEl.textContent;
+  const html = `
+    <div style="margin-top:10px;line-height:1.7">
+      🎉 <b>全問クリア！</b><br>
+      時間：<b>${totalTime}</b><br>
+      ミス：<b>${miss}</b><br><br>
+      <div class="row" style="margin-top:6px">
+        <button onclick="goSelector()">セット選択に戻る</button>
+        <button onclick="goSet('${escapeHtml(SET)}', ${params.get("hw")==="1"})">もう一回（同じセット）</button>
+        <button onclick="goHomeworkPage()">宿題ページへ</button>
+      </div>
+      <div class="small" style="margin-top:8px">
+        ※ 宿題のときは、ここでスクショして提出してね。
+      </div>
+    </div>
+  `;
+  statusEl.innerHTML = html;
+  statusEl.className = "status ok";
+}
+
+document.getElementById("btnToSelector").addEventListener("click", () => {
+  goSelector();
+});
+
 document.getElementById("btnCheck").addEventListener("click", () => {
   if(QUESTIONS.length === 0) return;
-  const correct = QUESTIONS[index].trim();
+  const correct = QUESTIONS[index].en.trim();
   const ans = currentAnswer();
 
   if(!ans){
@@ -334,39 +442,34 @@ document.getElementById("btnReset").addEventListener("click", () => {
 
 document.getElementById("btnNext").addEventListener("click", () => {
   if(QUESTIONS.length === 0) return;
+  startTimerOnce();
+
+  const correct = QUESTIONS[index].en.trim();
+  const ans = currentAnswer();
 
   // 正解していたら正解数カウント
-  const correct = QUESTIONS[index].trim();
-  const ans = currentAnswer();
   if(ans === correct){
     done++;
     doneEl.textContent = String(done);
   }
 
-  // 全問正解に到達したら終了（doneが問題数に達したら）
- function showSelector(){
-  document.body.innerHTML = `
-    <div style="font-family:sans-serif;text-align:center;margin-top:60px">
-      <h1>セットを選んでください</h1>
-      <div style="margin-top:30px;display:flex;flex-direction:column;gap:15px;max-width:300px;margin-left:auto;margin-right:auto;">
-        
-        <button onclick="location.search='?set=program1'" style="padding:15px;font-size:18px;">program1</button>
-        
-        <button onclick="location.search='?set=program2'" style="padding:15px;font-size:18px;">program2</button>
-        
-      </div>
-    </div>
-  `;
-}
+  // 全問正解に到達したら終了
+  if(done >= QUESTIONS.length){
+    showFinish();
+    return;
+  }
 
-
-  // 次の問題へ（ループ）
   index = (index + 1) % QUESTIONS.length;
   loadQuestion();
 });
 
 (async function init(){
-  setNameEl.textContent = SET;
+  // 宿題ページ
+  if(IS_HOMEWORK_MODE){
+    showHomework();
+    return;
+  }
+
   missEl.textContent = "0";
   doneEl.textContent = "0";
   timeEl.textContent = "00:00";
@@ -374,11 +477,36 @@ document.getElementById("btnNext").addEventListener("click", () => {
   if(timerId) clearInterval(timerId);
   timerId = null;
 
-  await loadQuestions();
+  try{
+    // まずCSVを読み込んで、セット一覧を自動生成
+    ALL_ROWS = await fetchCSVOnce();
+    SET_LIST = buildSetList(ALL_ROWS);
+
+    dbg("rows total = " + ALL_ROWS.length);
+    dbg("sets = " + SET_LIST.join(", "));
+    dbg("sample:\n" + ALL_ROWS.slice(0,5).map(r => `${r.set} | ${r.en} | ${r.ja}`).join("\n"));
+
+    // ③ setが無いなら、必ず選択画面
+    if(!SET){
+      showSelector();
+      return;
+    }
+
+    // setがあるなら、そのセットを開始
+    setNameEl.textContent = SET;
+    const ok = applySet();
+    if(!ok) return;
+
+  }catch(e){
+    statusEl.textContent = "読み込みエラー（CSVリンクや公開設定を確認）";
+    statusEl.className = "status ng";
+    dbg("exception: " + (e?.message || e));
+  }
 })();
 </script>
 </body>
 </html>
+
 
 
 
