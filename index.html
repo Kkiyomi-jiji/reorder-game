@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>並べ替え（語順）ゲーム</title>
+  <title>Kimi’s Classroom Tools | Word Order Game</title>
   <style>
     body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;margin:16px;background:#fff}
     .wrap{max-width:980px;margin:0 auto}
     h1{font-size:20px;margin:0 0 12px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-    button{padding:10px 12px;font-size:14px;border-radius:10px;border:1px solid #ddd;background:#fff}
+    button{padding:10px 12px;font-size:14px;border-radius:10px;border:1px solid #ddd;background:#fff;cursor:pointer}
     button:hover{background:#f7f7f7}
     .zone{min-height:68px;padding:12px;border:2px dashed #bbb;border-radius:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;background:#fafafa}
     .chip{padding:10px 12px;border:1px solid #ccc;border-radius:999px;background:#fff;cursor:grab;user-select:none}
@@ -22,18 +22,326 @@
     .metrics{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
     .metric{padding:8px 10px;border:1px solid #eee;border-radius:10px;background:#fff}
     code{background:#f4f4f4;padding:2px 6px;border-radius:6px}
-    .small{font-size:12px;color:#666}
+    .small{font-size:12px;color:#666;line-height:1.6}
     .pill{display:inline-block;padding:6px 10px;border:1px solid #ddd;border-radius:999px;background:#fff}
     a{color:#0b57d0}
     .jpbox{margin-top:6px;padding:10px 12px;border:1px solid #eee;border-radius:12px;background:#fff}
     .jpbox b{margin-right:6px}
     .warn{margin-top:8px;padding:10px 12px;border:1px solid #ffd4d4;background:#fff5f5;border-radius:12px;color:#b00020;line-height:1.6}
+    input[type="text"]{width:100%;padding:12px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px}
+    .btnbig{padding:14px 16px;font-size:16px}
+    .footer{margin-top:50px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#777}
   </style>
 </head>
-
 <body>
-  <div class="wrap">
-    <h1>並べ替え（語順）ゲーム</h1>
+  <div class="wrap" id="root"></div>
+
+<script>
+/** =======================
+ *  Kimi’s Classroom Tools
+ *  Word Order Game (Shareable)
+ * ======================= */
+
+/** ★先生が触るのはここだけ（任意） */
+const DEFAULT_CSV_URL = ""; // 自分用のCSVを入れるならここに。空でもOK。
+
+const TODAY_HOMEWORK = {
+  title: "今日の宿題はこちら",
+  note: "最後に出る結果をスクショして提出してね。",
+  items: [
+    { set: "program1", label: "宿題① program1（基本）" },
+    { set: "program2", label: "宿題② program2（チャレンジ）" },
+    { set: "program3", label: "宿題③ program3（追加）" },
+  ]
+};
+
+/** ===== ここから下は基本触らない ===== */
+const LS_KEY = "kct_wordorder_csv_v2";
+const root = document.getElementById("root");
+const params = new URLSearchParams(location.search);
+const VIEW = (params.get("view") || "").trim();
+let SET = (params.get("set") || "").trim();
+const IS_HOMEWORK_MODE = VIEW === "homework";
+
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, m => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+  }[m]));
+}
+
+function footerHtml(){
+  return `
+    <div class="footer">
+      <b>Kimi’s Classroom Tools</b><br>
+      Created by Kimi
+    </div>
+  `;
+}
+
+function setRootHtml(html){
+  root.innerHTML = html + footerHtml();
+}
+
+function normalizeCsvUrl(u){ return (u || "").trim(); }
+
+function getCsvFromQuery(){
+  const q = params.get("csv");
+  if(!q) return "";
+  try { return decodeURIComponent(q); } catch { return q; }
+}
+function getCsvFromStorage(){
+  try { return localStorage.getItem(LS_KEY) || ""; } catch { return ""; }
+}
+function saveCsvToStorage(u){
+  try { localStorage.setItem(LS_KEY, u); } catch {}
+}
+function clearStoredCsv(){
+  try { localStorage.removeItem(LS_KEY); } catch {}
+}
+
+function buildBaseUrlWithCsv(csvUrl){
+  const base = location.origin + location.pathname;
+  const qs = new URLSearchParams();
+  if(csvUrl) qs.set("csv", csvUrl);
+  const s = qs.toString();
+  return s ? (base + "?" + s) : base;
+}
+function goSelector(csvUrl){
+  location.href = buildBaseUrlWithCsv(csvUrl);
+}
+function goHomeworkPage(csvUrl){
+  const base = location.origin + location.pathname;
+  const qs = new URLSearchParams();
+  qs.set("view","homework");
+  if(csvUrl) qs.set("csv", csvUrl);
+  location.href = base + "?" + qs.toString();
+}
+function goSet(csvUrl, setKey, homework=false){
+  const base = location.origin + location.pathname;
+  const qs = new URLSearchParams();
+  qs.set("set", setKey);
+  if(homework) qs.set("hw","1");
+  if(csvUrl) qs.set("csv", csvUrl);
+  location.href = base + "?" + qs.toString();
+}
+
+/** RFC4180っぽいCSVパーサ（3列想定：set,sentence,ja）
+ *  - 2列でも動く（jaは空）
+ *  - 3列目以降は日本語として結合（カンマ含みOK）
+ */
+function parseCSV(text){
+  text = String(text || "").replace(/^\uFEFF/, "");
+  const rows = [];
+  let i = 0;
+  let field = "";
+  let inQuotes = false;
+  const pushField = (arr) => { arr.push(field); field = ""; };
+  let current = [];
+
+  while(i < text.length){
+    const c = text[i];
+    if(inQuotes){
+      if(c === '"'){
+        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
+        inQuotes = false; i++; continue;
+      } else { field += c; i++; continue; }
+    } else {
+      if(c === '"'){ inQuotes = true; i++; continue; }
+      if(c === ','){ pushField(current); i++; continue; }
+      if(c === '\r'){ i++; continue; }
+      if(c === '\n'){
+        pushField(current);
+        rows.push(current);
+        current = [];
+        i++; continue;
+      }
+      field += c; i++; continue;
+    }
+  }
+  pushField(current);
+  if(current.length > 1 || (current[0] ?? "").trim() !== "") rows.push(current);
+
+  if(rows.length > 0) rows.shift(); // header
+
+  return rows
+    .filter(r => r.length >= 2)
+    .map(r => ({
+      set: String(r[0] ?? "").trim(),
+      en:  String(r[1] ?? "").trim(),
+      ja:  String(r.slice(2).join(",") ?? "").trim()
+    }))
+    .filter(r => r.set && r.en);
+}
+
+async function fetchCSVOnce(csvUrl){
+  const url = csvUrl + (csvUrl.includes("?") ? "&" : "?") + "t=" + Date.now();
+  const res = await fetch(url, { cache:"no-store" });
+  if(!res.ok) throw new Error("fetch failed: " + res.status + " " + res.statusText);
+  const text = await res.text();
+  return parseCSV(text);
+}
+
+function buildSetList(rows){
+  return [...new Set(rows.map(r => r.set))].sort((a,b)=>a.localeCompare(b,"ja"));
+}
+
+function formatTime(ms){
+  const s = Math.floor(ms/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,"0");
+  const ss = String(s%60).padStart(2,"0");
+  return `${mm}:${ss}`;
+}
+
+function shuffle(arr){
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+function tokenize(sentence){
+  return sentence.trim().split(/\s+/);
+}
+
+/** ---------- UI: Start (CSV input) ---------- */
+function showStartScreen(initialCsv, errMsg=""){
+  setRootHtml(`
+    <div style="max-width:760px;margin:40px auto 0;padding:0 10px">
+      <h1 style="font-size:22px;margin:0 0 10px">Word Order Game</h1>
+      <div class="small">
+        このアプリは <b>GoogleスプレッドシートのCSV</b> を読み込んで動きます。<br>
+        先生はコードを書き換えなくてOK。<b>CSV URLを貼るだけ</b>です。
+      </div>
+
+      <div class="card">
+        <div class="hint">① スプレッドシート列（おすすめ）</div>
+        <div class="small"><code>set</code> / <code>sentence</code> / <code>ja</code>（jaは任意）</div>
+
+        <div class="hint" style="margin-top:10px">② CSV URLを貼る</div>
+        <input id="csvInput" type="text" placeholder="https://docs.google.com/.../pub?output=csv" value="${escapeHtml(initialCsv)}" />
+
+        <div class="row" style="margin-top:10px">
+          <button class="btnbig" id="btnStart">スタート</button>
+          <button id="btnUseDefault">デフォルトを使う</button>
+          <button id="btnHow">公開のしかた</button>
+        </div>
+
+        <div class="warn" id="startWarn" style="display:${errMsg? "block":"none"}">${escapeHtml(errMsg)}</div>
+      </div>
+
+      <div class="card">
+        <div class="hint">同僚に配るとき（おすすめ）</div>
+        <div class="small">
+          同僚のCSVを使わせたい場合は、URLの後ろに <code>?csv=（CSV URL）</code> を付けます。<br>
+          例：<code>${escapeHtml(location.origin + location.pathname)}?csv=（CSV URL）</code>
+        </div>
+      </div>
+    </div>
+  `);
+
+  const input = document.getElementById("csvInput");
+  const warn = document.getElementById("startWarn");
+
+  const showWarn = (html) => { warn.style.display="block"; warn.innerHTML = html; };
+
+  document.getElementById("btnHow").addEventListener("click", () => {
+    showWarn(`
+      <b>GoogleスプレッドシートをCSVで使う手順</b><br>
+      1) スプレッドシート → <b>ファイル</b><br>
+      2) <b>共有</b> → <b>ウェブに公開</b><br>
+      3) URLの最後が <code>pub?output=csv</code> になっているリンクを使う<br>
+      4) 追記したのに反映されない時は「公開を停止→再公開」
+    `);
+  });
+
+  document.getElementById("btnUseDefault").addEventListener("click", () => {
+    input.value = DEFAULT_CSV_URL || "";
+  });
+
+  document.getElementById("btnStart").addEventListener("click", () => {
+    const csvUrl = normalizeCsvUrl(input.value);
+    if(!csvUrl){
+      showWarn("CSV URLを貼ってください。");
+      return;
+    }
+    saveCsvToStorage(csvUrl);
+    goSelector(csvUrl);
+  });
+}
+
+/** ---------- UI: Homework ---------- */
+function showHomework(csvUrl){
+  const base = location.origin + location.pathname;
+  const items = TODAY_HOMEWORK.items.map((it, idx) => {
+    const qs = new URLSearchParams();
+    qs.set("set", it.set);
+    qs.set("hw","1");
+    if(csvUrl) qs.set("csv", csvUrl);
+    const url = base + "?" + qs.toString();
+    return `
+      <div style="border:1px solid #eee;border-radius:12px;padding:12px;text-align:left;background:#fff">
+        <div style="font-weight:800">${idx+1}. ${escapeHtml(it.label)}</div>
+        <div style="margin-top:6px"><a href="${url}">${url}</a></div>
+      </div>
+    `;
+  }).join("");
+
+  setRootHtml(`
+    <div style="max-width:760px;margin:40px auto 0;padding:0 16px">
+      <h1 style="font-size:22px;margin:0 0 8px">${escapeHtml(TODAY_HOMEWORK.title)}</h1>
+      <div class="small" style="margin-bottom:14px">${escapeHtml(TODAY_HOMEWORK.note)}</div>
+      <div style="display:flex;flex-direction:column;gap:12px">${items}</div>
+      <div class="row" style="margin-top:18px">
+        <button onclick="(${goSelector.toString()})('${escapeHtml(csvUrl)}')">セット選択に戻る</button>
+        <button onclick="(${showStartScreen.toString()})('${escapeHtml(csvUrl)}')">CSVを変える</button>
+      </div>
+      <div class="small" style="margin-top:14px">
+        ※ 生徒にはこのページURL（<code>?view=homework</code>）を配るのが楽です。
+      </div>
+    </div>
+  `);
+}
+
+/** ---------- UI: Selector ---------- */
+function showSelector(csvUrl, setList){
+  const buttons = setList.map(s =>
+    `<button class="btnbig" onclick="(${goSet.toString()})('${escapeHtml(csvUrl)}','${escapeHtml(s)}',false)">${escapeHtml(s)}</button>`
+  ).join("");
+
+  setRootHtml(`
+    <div style="max-width:640px;margin:60px auto 0;padding:0 16px;text-align:center">
+      <h1 style="font-size:22px;margin:0 0 12px">セットを選んでください</h1>
+      <div class="small" style="margin-bottom:14px">
+        （CSVに入っているセット：${escapeHtml(setList.join(", ") || "なし")}）
+      </div>
+
+      <div style="display:flex;flex-direction:column;gap:12px">
+        ${buttons || "<div class='warn'>セットが見つかりません。CSVのset列を確認してください。</div>"}
+      </div>
+
+      <div class="row" style="margin-top:18px;justify-content:center">
+        <button onclick="(${goHomeworkPage.toString()})('${escapeHtml(csvUrl)}')">今日の宿題はこちら</button>
+        <button onclick="(${showStartScreen.toString()})('${escapeHtml(csvUrl)}')">CSVを変える</button>
+        <button onclick="(function(){(${clearStoredCsv.toString()})(); location.href=location.pathname;})()">この端末の保存を消す</button>
+      </div>
+
+      <div class="card" style="text-align:left">
+        <div class="hint">先生メモ</div>
+        <div class="small">
+          ・セットは <b>set列</b> を増やすだけで自動追加（コード修正なし）<br>
+          ・日本語訳は <b>ja列</b> に入れると表示（空なら非表示）<br>
+          ・追記したのに反映されない時は「ウェブに公開」を <b>停止→再公開</b> が効きます
+        </div>
+      </div>
+    </div>
+  `);
+}
+
+/** ---------- Game shell ---------- */
+function renderGameShell(){
+  setRootHtml(`
+    <h1>Word Order Game</h1>
 
     <div class="row">
       <button id="btnCheck">答え合わせ</button>
@@ -70,7 +378,7 @@
         <div class="metric">正解：<span id="done">0</span></div>
       </div>
       <div class="small">
-        例：<code>?set=program1</code> ／ <code>?set=program2</code> ／ <code>?view=homework</code>
+        例：<code>?view=homework</code> ／ <code>?csv=...</code>
       </div>
       <div class="warn" id="csvWarn" style="display:none;"></div>
     </div>
@@ -79,483 +387,275 @@
       <div class="hint">読み込み状況（困ったとき用）</div>
       <pre id="debug" style="white-space:pre-wrap;margin:8px 0 0;"></pre>
     </div>
-  </div>
-
-<script>
-/** =======================
- *  先生が触るのはここだけ
- * ======================= */
-
-/** ★ CSV公開URL（3列：set,sentence,ja を推奨） */
-const CSV_URL =
-  "https://docs.google.com/spreadsheets/d/e/2PACX-1vQl__u8k5jdrWX0EeT3HLywC9xJuMEG_ayrAleSBtKde74WBk8VYqtXvSSz60LnNSp4-qUKZygr0C5E/pub?output=csv";
-
-/** ★ 今日の宿題（毎日ここだけ変更） */
-const TODAY_HOMEWORK = {
-  title: "今日の宿題はこちら",
-  note: "最後に出る結果をスクショして提出してね。",
-  items: [
-    { set: "program1", label: "宿題① program1（基本）" },
-    { set: "program2", label: "宿題② program2（チャレンジ）" },
-    { set: "program3", label: "宿題③ program3（追加）" },
-  ]
-};
-
-/** =======================
- *  ここから下は基本触らない
- * ======================= */
-
-const params = new URLSearchParams(location.search);
-const VIEW = (params.get("view") || "").trim();   // view=homework
-let SET = (params.get("set") || "").trim();       // set=program1
-const IS_HOMEWORK_MODE = VIEW === "homework";
-
-const bank = document.getElementById("bank");
-const answer = document.getElementById("answer");
-const statusEl = document.getElementById("status");
-const setNameEl = document.getElementById("setName");
-const qnoEl = document.getElementById("qno");
-const qtotalEl = document.getElementById("qtotal");
-const timeEl = document.getElementById("time");
-const missEl = document.getElementById("miss");
-const doneEl = document.getElementById("done");
-const modeTag = document.getElementById("modeTag");
-
-const jpCard = document.getElementById("jpCard");
-const jpText = document.getElementById("jpText");
-
-const csvWarn = document.getElementById("csvWarn");
-const debugBox = document.getElementById("debugBox");
-const debugEl = document.getElementById("debug");
-
-let ALL_ROWS = [];   // [{set,en,ja}]
-let SET_LIST = [];   // ["program1","program2"...]
-let QUESTIONS = [];  // [{en,ja}]
-let index = 0;
-let miss = 0;
-let done = 0;
-
-let startAt = null;
-let timerId = null;
-
-function dbg(msg){
-  debugEl.textContent += msg + "\n";
+  `);
 }
 
-function showWarn(html){
-  csvWarn.style.display = "block";
-  csvWarn.innerHTML = html;
-}
-function hideWarn(){
-  csvWarn.style.display = "none";
-  csvWarn.innerHTML = "";
-}
+/** ---------- Game ---------- */
+function startGame(csvUrl, allRows){
+  renderGameShell();
 
-function formatTime(ms){
-  const s = Math.floor(ms/1000);
-  const mm = String(Math.floor(s/60)).padStart(2,"0");
-  const ss = String(s%60).padStart(2,"0");
-  return `${mm}:${ss}`;
-}
+  const bank = document.getElementById("bank");
+  const answer = document.getElementById("answer");
+  const statusEl = document.getElementById("status");
+  const setNameEl = document.getElementById("setName");
+  const qnoEl = document.getElementById("qno");
+  const qtotalEl = document.getElementById("qtotal");
+  const timeEl = document.getElementById("time");
+  const missEl = document.getElementById("miss");
+  const doneEl = document.getElementById("done");
+  const modeTag = document.getElementById("modeTag");
+  const jpCard = document.getElementById("jpCard");
+  const jpText = document.getElementById("jpText");
+  const warnBox = document.getElementById("csvWarn");
+  const debugBox = document.getElementById("debugBox");
+  const debugEl = document.getElementById("debug");
 
-function startTimerOnce(){
-  if(startAt !== null) return;
-  startAt = Date.now();
-  timerId = setInterval(()=> {
-    timeEl.textContent = formatTime(Date.now() - startAt);
-  }, 250);
-}
+  const homework = (params.get("hw") === "1");
 
-function stopTimer(){
-  if(timerId) clearInterval(timerId);
-  timerId = null;
-}
+  const dbg = (msg) => { debugEl.textContent += msg + "\n"; };
 
-function shuffle(arr){
-  const a = [...arr];
-  for(let i=a.length-1;i>0;i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [a[i],a[j]] = [a[j],a[i]];
-  }
-  return a;
-}
+  const showWarn = (html) => { warnBox.style.display="block"; warnBox.innerHTML = html; };
+  const hideWarn = () => { warnBox.style.display="none"; warnBox.innerHTML = ""; };
 
-function tokenize(sentence){
-  return sentence.trim().split(/\s+/);
-}
+  const QUESTIONS = allRows.filter(r => r.set === SET).map(r => ({ en:r.en, ja:r.ja }));
 
-/** CSVパーサ（3列：set,sentence,ja）
- *  ※ jaが無い場合でも動く（空扱い）
- *  ※ 3列目以降は日本語として結合（カンマ含みOK）
- */
-function parseCSV(text){
-  text = text.replace(/^\uFEFF/, "");
-  const rows = [];
-  let i = 0;
-  let field = "";
-  let inQuotes = false;
-  const pushField = (arr) => { arr.push(field); field = ""; };
-  let current = [];
-
-  while(i < text.length){
-    const c = text[i];
-    if(inQuotes){
-      if(c === '"'){
-        if(text[i+1] === '"'){ field += '"'; i += 2; continue; }
-        inQuotes = false; i++; continue;
-      } else {
-        field += c; i++; continue;
-      }
-    } else {
-      if(c === '"'){ inQuotes = true; i++; continue; }
-      if(c === ','){ pushField(current); i++; continue; }
-      if(c === '\r'){ i++; continue; }
-      if(c === '\n'){
-        pushField(current);
-        rows.push(current);
-        current = [];
-        i++; continue;
-      }
-      field += c; i++; continue;
-    }
-  }
-  pushField(current);
-  if(current.length > 1 || (current[0] ?? "").trim() !== "") rows.push(current);
-
-  // headerを捨てる
-  if(rows.length > 0) rows.shift();
-
-  return rows
-    .filter(r => r.length >= 2)
-    .map(r => ({
-      set: String(r[0] ?? "").trim(),
-      en:  String(r[1] ?? "").trim(),
-      ja:  String(r.slice(2).join(",") ?? "").trim()
-    }))
-    .filter(r => r.set && r.en);
-}
-
-/** 画面遷移 */
-function goSelector(){
-  location.href = location.pathname; // ?set= を消してトップへ
-}
-function goHomeworkPage(){
-  location.href = location.pathname + "?view=homework";
-}
-function goSet(setKey, homework=false){
-  const qs = new URLSearchParams();
-  qs.set("set", setKey);
-  if(homework) qs.set("hw", "1");
-  location.href = location.pathname + "?" + qs.toString();
-}
-
-/** 選択画面（CSVのset列から自動生成） */
-function showSelector(){
-  const buttons = SET_LIST.map(s =>
-    `<button style="padding:14px 16px;font-size:16px" onclick="goSet('${escapeHtml(s)}')">${escapeHtml(s)}</button>`
-  ).join("");
-
-  document.body.innerHTML = `
-    <div style="font-family:system-ui;max-width:640px;margin:70px auto 0;padding:0 16px;text-align:center">
-      <h1 style="font-size:22px;margin:0 0 12px">セットを選んでください</h1>
-      <div style="color:#666;font-size:13px;margin-bottom:14px">
-        （CSVに入っているセット：${escapeHtml(SET_LIST.join(", ") || "なし")}）
-      </div>
-
-      <div style="display:flex;flex-direction:column;gap:12px">
-        ${buttons || "<div style='color:#b00020'>セットが見つかりません。CSVの公開設定／URLを確認してください。</div>"}
-      </div>
-
-      <div style="margin-top:18px">
-        <button style="padding:12px 14px;font-size:14px" onclick="goHomeworkPage()">今日の宿題はこちら</button>
-      </div>
-
-      <div style="margin-top:14px;color:#666;font-size:13px;line-height:1.6;text-align:left;border:1px solid #eee;border-radius:12px;padding:12px">
-        <b>先生メモ：</b><br>
-        ・セットは <b>スプレッドシートのset列</b> を増やすだけで自動で追加されます（コード修正ゼロ）<br>
-        ・日本語訳は <b>ja列</b> に入れると表示されます（空なら非表示）
-      </div>
-    </div>
-  `;
-}
-
-/** 宿題ページ */
-function showHomework(){
-  const base = location.origin + location.pathname;
-  const items = TODAY_HOMEWORK.items.map((it, idx) => {
-    const url = base + `?set=${encodeURIComponent(it.set)}&hw=1`;
-    return `
-      <div style="border:1px solid #eee;border-radius:12px;padding:12px;text-align:left;background:#fff">
-        <div style="font-weight:800">${idx+1}. ${escapeHtml(it.label)}</div>
-        <div style="margin-top:6px">
-          <a href="${url}">${url}</a>
-        </div>
-      </div>
-    `;
-  }).join("");
-
-  document.body.innerHTML = `
-    <div style="font-family:system-ui;max-width:760px;margin:40px auto 0;padding:0 16px">
-      <h1 style="font-size:22px;margin:0 0 8px">${escapeHtml(TODAY_HOMEWORK.title)}</h1>
-      <div style="color:#666;font-size:14px;margin-bottom:14px">${escapeHtml(TODAY_HOMEWORK.note)}</div>
-      <div style="display:flex;flex-direction:column;gap:12px">${items}</div>
-
-      <div style="margin-top:18px;display:flex;gap:10px;flex-wrap:wrap">
-        <button onclick="goSelector()">セット選択に戻る</button>
-      </div>
-
-      <div style="margin-top:14px;color:#666;font-size:12px">
-        ※ 生徒にはこのページURL（<code>?view=homework</code>）を配るのが楽です。
-      </div>
-    </div>
-  `;
-}
-
-/** 簡単エスケープ */
-function escapeHtml(s){
-  return String(s).replace(/[&<>"']/g, m => ({
-    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
-  }[m]));
-}
-
-function clearZones(){
-  bank.innerHTML = "";
-  answer.innerHTML = "";
-  statusEl.textContent = "";
-  statusEl.className = "status";
-}
-
-function makeChip(text){
-  const el = document.createElement("div");
-  el.className = "chip";
-  el.textContent = text;
-  el.draggable = true;
-
-  el.addEventListener("dragstart", (e) => {
-    e.dataTransfer.setData("text/plain", el.dataset.id);
-    startTimerOnce();
-  });
-
-  el.addEventListener("click", () => {
-    startTimerOnce();
-    if(el.parentElement?.id === "bank") answer.appendChild(el);
-    else bank.appendChild(el);
-  });
-
-  return el;
-}
-
-function enableDrop(zone){
-  zone.addEventListener("dragover", (e) => e.preventDefault());
-  zone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    const id = e.dataTransfer.getData("text/plain");
-    const chip = document.querySelector(`[data-id="${id}"]`);
-    if(chip) zone.appendChild(chip);
-    startTimerOnce();
-  });
-}
-
-enableDrop(bank);
-enableDrop(answer);
-
-function loadQuestion(){
-  clearZones();
-  qnoEl.textContent = String(index + 1);
-
-  const jp = (QUESTIONS[index]?.ja || "").trim();
-  if(jp){
-    jpCard.style.display = "block";
-    jpText.textContent = jp;
-  }else{
-    jpCard.style.display = "none";
-    jpText.textContent = "";
-  }
-
-  const tokens = tokenize(QUESTIONS[index].en);
-  const mixed = shuffle(tokens);
-
-  mixed.forEach((t, k) => {
-    const chip = makeChip(t);
-    chip.dataset.id = `${index}-${k}-${Math.random().toString(16).slice(2)}`;
-    bank.appendChild(chip);
-  });
-}
-
-function currentAnswer(){
-  return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ").trim();
-}
-
-async function fetchCSVOnce(){
-  const url = CSV_URL + (CSV_URL.includes("?") ? "&" : "?") + "t=" + Date.now();
-  const res = await fetch(url, { cache: "no-store" });
-  if(!res.ok) throw new Error("fetch failed: " + res.status + " " + res.statusText);
-  const text = await res.text();
-  return parseCSV(text);
-}
-
-function buildSetList(rows){
-  return [...new Set(rows.map(r => r.set))].sort((a,b)=>a.localeCompare(b,"ja"));
-}
-
-function applySet(){
   setNameEl.textContent = SET || "";
-  modeTag.style.display = (params.get("hw") === "1") ? "inline-block" : "none";
-
-  QUESTIONS = ALL_ROWS
-    .filter(r => r.set === SET)
-    .map(r => ({ en: r.en, ja: r.ja }));
-
+  modeTag.style.display = homework ? "inline-block" : "none";
   qtotalEl.textContent = String(QUESTIONS.length);
+
+  dbg("csv = " + csvUrl);
+  dbg("set = " + SET);
+  dbg("rows total = " + allRows.length);
+  dbg("questions in set = " + QUESTIONS.length);
 
   if(QUESTIONS.length === 0){
     statusEl.textContent = `セット「${SET}」が0件です`;
     statusEl.className = "status ng";
     showWarn(`
       <b>このセットが見つかりません。</b><br>
-      CSV_URLの中に「${escapeHtml(SET)}」の行がありません。<br>
-      スプレッドシート側で「ウェブに公開」を停止→再公開すると直ることが多いです。
+      CSVのset列に「${escapeHtml(SET)}」が入っているか確認してください。<br>
+      追記したのに反映されない時は「ウェブに公開」を <b>停止→再公開</b> が効きます。
     `);
-    return false;
+    return;
   }
-
   hideWarn();
-  loadQuestion();
-  return true;
-}
 
-function showFinish(){
-  stopTimer();
-  const totalTime = (startAt === null) ? "00:00" : timeEl.textContent;
-  const html = `
-    <div style="margin-top:10px;line-height:1.7">
-      🎉 <b>全問クリア！</b><br>
-      時間：<b>${totalTime}</b><br>
-      ミス：<b>${miss}</b><br><br>
-      <div class="row" style="margin-top:6px">
-        <button onclick="goSelector()">セット選択に戻る</button>
-        <button onclick="goSet('${escapeHtml(SET)}', ${params.get("hw")==="1"})">もう一回（同じセット）</button>
-        <button onclick="goHomeworkPage()">宿題ページへ</button>
-      </div>
-      <div class="small" style="margin-top:8px">
-        ※ 宿題のときは、ここでスクショして提出してね。
-      </div>
-    </div>
-  `;
-  statusEl.innerHTML = html;
-  statusEl.className = "status ok";
-}
+  let index = 0;
+  let miss = 0;
+  let done = 0;
+  let startAt = null;
+  let timerId = null;
 
-/** ボタン */
-document.getElementById("btnToSelector").addEventListener("click", () => goSelector());
-
-document.getElementById("btnToggleDebug").addEventListener("click", () => {
-  debugBox.style.display = (debugBox.style.display === "none") ? "block" : "none";
-});
-
-document.getElementById("btnCheck").addEventListener("click", () => {
-  if(QUESTIONS.length === 0) return;
-  const correct = QUESTIONS[index].en.trim();
-  const ans = currentAnswer();
-
-  if(!ans){
-    statusEl.textContent = "下に並べてから答え合わせしてね。";
-    statusEl.className = "status ng";
-    return;
-  }
-
-  if(ans === correct){
-    statusEl.textContent = "正解！🎉";
-    statusEl.className = "status ok";
-  }else{
-    miss++;
-    missEl.textContent = String(miss);
-    statusEl.textContent = "まだちがうよ。もう一回！";
-    statusEl.className = "status ng";
-  }
-});
-
-document.getElementById("btnReset").addEventListener("click", () => {
-  [...answer.querySelectorAll(".chip")].forEach(chip => bank.appendChild(chip));
-  statusEl.textContent = "";
-  statusEl.className = "status";
-});
-
-document.getElementById("btnNext").addEventListener("click", () => {
-  if(QUESTIONS.length === 0) return;
-  startTimerOnce();
-
-  const correct = QUESTIONS[index].en.trim();
-  const ans = currentAnswer();
-
-  if(ans === correct){
-    done++;
-    doneEl.textContent = String(done);
-  }
-
-  if(done >= QUESTIONS.length){
-    showFinish();
-    return;
-  }
-
-  index = (index + 1) % QUESTIONS.length;
-  loadQuestion();
-});
-
-/** 初期化 */
-(async function init(){
-  // 宿題ページ
-  if(IS_HOMEWORK_MODE){
-    showHomework();
-    return;
-  }
-
-  // 初期表示
   missEl.textContent = "0";
   doneEl.textContent = "0";
   timeEl.textContent = "00:00";
-  startAt = null;
-  if(timerId) clearInterval(timerId);
-  timerId = null;
-  debugEl.textContent = "";
+  qnoEl.textContent = "1";
 
-  try{
-    ALL_ROWS = await fetchCSVOnce();
-    SET_LIST = buildSetList(ALL_ROWS);
+  function startTimerOnce(){
+    if(startAt !== null) return;
+    startAt = Date.now();
+    timerId = setInterval(()=> {
+      timeEl.textContent = formatTime(Date.now() - startAt);
+    }, 250);
+  }
+  function stopTimer(){
+    if(timerId) clearInterval(timerId);
+    timerId = null;
+  }
 
-    dbg("CSV_URL = " + CSV_URL);
-    dbg("rows total = " + ALL_ROWS.length);
-    dbg("sets = " + SET_LIST.join(", "));
-    dbg("sample:\n" + ALL_ROWS.slice(0,10).map(r => `${r.set} | ${r.en} | ${r.ja}`).join("\n"));
+  function clearZones(){
+    bank.innerHTML = "";
+    answer.innerHTML = "";
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  }
 
-    // 何も付けずに開いたら必ず選択画面
-    if(!SET){
-      showSelector();
+  function makeChip(text){
+    const el = document.createElement("div");
+    el.className = "chip";
+    el.textContent = text;
+    el.draggable = true;
+
+    el.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", el.dataset.id);
+      startTimerOnce();
+    });
+
+    el.addEventListener("click", () => {
+      startTimerOnce();
+      if(el.parentElement?.id === "bank") answer.appendChild(el);
+      else bank.appendChild(el);
+    });
+
+    return el;
+  }
+
+  function enableDrop(zone){
+    zone.addEventListener("dragover", (e) => e.preventDefault());
+    zone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const id = e.dataTransfer.getData("text/plain");
+      const chip = document.querySelector(`[data-id="${id}"]`);
+      if(chip) zone.appendChild(chip);
+      startTimerOnce();
+    });
+  }
+  enableDrop(bank);
+  enableDrop(answer);
+
+  function loadQuestion(){
+    clearZones();
+    qnoEl.textContent = String(index + 1);
+
+    const jp = (QUESTIONS[index]?.ja || "").trim();
+    if(jp){
+      jpCard.style.display = "block";
+      jpText.textContent = jp;
+    }else{
+      jpCard.style.display = "none";
+      jpText.textContent = "";
+    }
+
+    const tokens = tokenize(QUESTIONS[index].en);
+    const mixed = shuffle(tokens);
+
+    mixed.forEach((t, k) => {
+      const chip = makeChip(t);
+      chip.dataset.id = `${index}-${k}-${Math.random().toString(16).slice(2)}`;
+      bank.appendChild(chip);
+    });
+  }
+
+  function currentAnswer(){
+    return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ").trim();
+  }
+
+  function showFinish(){
+    stopTimer();
+    const totalTime = (startAt === null) ? "00:00" : timeEl.textContent;
+    const html = `
+      <div style="margin-top:10px;line-height:1.7">
+        🎉 <b>全問クリア！</b><br>
+        時間：<b>${escapeHtml(totalTime)}</b><br>
+        ミス：<b>${escapeHtml(String(miss))}</b><br><br>
+        <div class="row" style="margin-top:6px">
+          <button onclick="(${goSelector.toString()})('${escapeHtml(csvUrl)}')">セット選択に戻る</button>
+          <button onclick="(${goSet.toString()})('${escapeHtml(csvUrl)}','${escapeHtml(SET)}',${homework ? "true":"false"})">もう一回（同じセット）</button>
+          <button onclick="(${goHomeworkPage.toString()})('${escapeHtml(csvUrl)}')">宿題ページへ</button>
+        </div>
+        <div class="small" style="margin-top:8px">
+          ※ 宿題のときは、ここでスクショして提出してね。
+        </div>
+      </div>
+    `;
+    statusEl.innerHTML = html;
+    statusEl.className = "status ok";
+  }
+
+  loadQuestion();
+
+  document.getElementById("btnToSelector").addEventListener("click", () => goSelector(csvUrl));
+
+  document.getElementById("btnToggleDebug").addEventListener("click", () => {
+    debugBox.style.display = (debugBox.style.display === "none") ? "block" : "none";
+  });
+
+  document.getElementById("btnCheck").addEventListener("click", () => {
+    const correct = QUESTIONS[index].en.trim();
+    const ans = currentAnswer();
+
+    if(!ans){
+      statusEl.textContent = "下に並べてから答え合わせしてね。";
+      statusEl.className = "status ng";
       return;
     }
 
-    // setがあるなら開始
-    const ok = applySet();
-    if(!ok) return;
+    if(ans === correct){
+      statusEl.textContent = "正解！🎉";
+      statusEl.className = "status ok";
+    }else{
+      miss++;
+      missEl.textContent = String(miss);
+      statusEl.textContent = "まだちがうよ。もう一回！";
+      statusEl.className = "status ng";
+    }
+  });
 
-  }catch(e){
-    statusEl.textContent = "読み込みエラー（CSVリンクや公開設定を確認）";
-    statusEl.className = "status ng";
-    showWarn(`
-      <b>CSVが読み込めません。</b><br>
-      ・スプレッドシートが「ウェブに公開」になっているか<br>
-      ・CSV_URLが正しいか（pub?output=csv）
-    `);
-    dbg("exception: " + (e?.message || e));
-    debugBox.style.display = "block";
+  document.getElementById("btnReset").addEventListener("click", () => {
+    [...answer.querySelectorAll(".chip")].forEach(chip => bank.appendChild(chip));
+    statusEl.textContent = "";
+    statusEl.className = "status";
+  });
+
+  document.getElementById("btnNext").addEventListener("click", () => {
+    startTimerOnce();
+
+    const correct = QUESTIONS[index].en.trim();
+    const ans = currentAnswer();
+
+    if(ans === correct){
+      done++;
+      doneEl.textContent = String(done);
+    }
+
+    if(done >= QUESTIONS.length){
+      showFinish();
+      return;
+    }
+
+    index = (index + 1) % QUESTIONS.length;
+    loadQuestion();
+  });
+}
+
+/** ---------- init ---------- */
+(async function init(){
+  const csvFromQuery = normalizeCsvUrl(getCsvFromQuery());
+  const csvFromLS = normalizeCsvUrl(getCsvFromStorage());
+  const csvUrl = normalizeCsvUrl(csvFromQuery || csvFromLS || DEFAULT_CSV_URL);
+
+  // 宿題ページ
+  if(IS_HOMEWORK_MODE){
+    if(!csvUrl){
+      showStartScreen("", "宿題ページを使う前に、CSV URLを設定してください。");
+      return;
+    }
+    showHomework(csvUrl);
+    return;
   }
+
+  // csvが無いならスタート画面
+  if(!csvUrl){
+    showStartScreen("");
+    return;
+  }
+
+  let rows = [];
+  try{
+    rows = await fetchCSVOnce(csvUrl);
+  }catch(e){
+    showStartScreen(csvUrl, "CSVが読み込めませんでした。URLや「ウェブに公開」を確認してください。\n" + (e?.message || String(e)));
+    return;
+  }
+
+  const setList = buildSetList(rows);
+  if(setList.length === 0){
+    showStartScreen(csvUrl, "CSVに問題が見つかりません。列（set / sentence / ja）を確認してください。");
+    return;
+  }
+
+  // set指定が無ければ必ず選択画面
+  if(!SET){
+    showSelector(csvUrl, setList);
+    return;
+  }
+
+  // set指定があればゲーム開始
+  startGame(csvUrl, rows);
 })();
 </script>
 </body>
 </html>
-
-
-
 
 
 
