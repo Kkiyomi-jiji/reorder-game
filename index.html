@@ -32,7 +32,7 @@
     .btnbig{padding:14px 16px;font-size:16px}
     .footer{margin-top:50px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#777}
     .gradebar{display:flex;gap:10px;flex-wrap:wrap;justify-content:center;margin-top:12px}
-    .gradebtn{padding:12px 14px;font-size:15px;border-radius:999px}
+    .gradebtn{padding:12px 16px;font-size:16px;border-radius:999px}
   </style>
 </head>
 <body>
@@ -41,39 +41,42 @@
 <script>
 /** =========================
  * Kimi’s Classroom Tools
- * Word Order Game (Complete)
+ * Word Order Game (Final)
+ * CSV columns: g,set,sentence,ja
+ * - g: 1/2/3 (numbers)
+ * - set: p01, test1, review... (no underscore needed)
  * ========================= */
 
 /** ★先生が触るのはここだけ（任意） */
-const DEFAULT_CSV_URL = ""; // 自分用のCSVを固定したいならここに入れる（空でもOK）
+const DEFAULT_CSV_URL = ""; // 自分用のCSVを固定したいならここに（空でもOK）
 
-/** ★宿題ページ（任意：あなた用に書き換えOK） */
+/** ★宿題ページ（任意：あなた用） */
 const TODAY_HOMEWORK = {
   title: "今日の宿題はこちら",
   note: "最後に出る結果をスクショして提出してね。",
   items: [
-    { set: "g1_u01", label: "宿題① 1年 g1_u01" },
-    { set: "g3_u01", label: "宿題② 3年 g3_u01" },
+    { g:"1", set:"p01", label:"宿題① 1年 p01" },
+    { g:"3", set:"p01", label:"宿題② 3年 p01" },
+    { g:"2", set:"p08", label:"宿題③ 2年 p08" },
   ]
 };
 
 /** ====== ここから下は基本触らない ====== */
-const LS_KEY = "kct_wordorder_csv_v3";
+const LS_KEY = "kct_wordorder_csv_v5";
 const root = document.getElementById("root");
 const params = new URLSearchParams(location.search);
 
 const VIEW = (params.get("view") || "").trim();      // view=homework
-let SET = (params.get("set") || "").trim();          // set=...
-const HW = (params.get("hw") === "1");
-const TEACHER = (params.get("teacher") === "1");
-const GRADE = (params.get("grade") || "").trim();    // grade=1/2/3/all/other
+let SET = (params.get("set") || "").trim();          // set=p01
+const HW = (params.get("hw") === "1");               // hw=1
+const TEACHER = (params.get("teacher") === "1");     // teacher=1
+const G = (params.get("g") || "").trim();            // g=1/2/3
 
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, m => ({
     "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
   }[m]));
 }
-
 function footerHtml(){
   return `
     <div class="footer">
@@ -87,7 +90,6 @@ function setRootHtml(html){
 }
 
 function normalizeCsvUrl(u){ return (u || "").trim(); }
-
 function getCsvFromQuery(){
   const q = params.get("csv");
   if(!q) return "";
@@ -115,27 +117,27 @@ function buildUrl(qsObj){
   return s ? (base + "?" + s) : base;
 }
 
-function goStudentHome(csvUrl){
-  location.href = buildUrl({ csv: csvUrl || "" }); // 生徒トップ（setなし）
+function gLabel(g){
+  if(String(g) === "1") return "1年";
+  if(String(g) === "2") return "2年";
+  if(String(g) === "3") return "3年";
+  return "—";
 }
-function goTeacher(csvUrl){
-  location.href = buildUrl({ teacher: "1", csv: csvUrl || "" });
-}
-function goHomework(csvUrl){
-  location.href = buildUrl({ view:"homework", csv: csvUrl || "" });
-}
-function goGrade(csvUrl, grade){
-  location.href = buildUrl({ grade: grade, csv: csvUrl || "" });
-}
-function goSet(csvUrl, setKey, homework=false){
-  location.href = buildUrl({ set: setKey, hw: homework ? "1" : "", csv: csvUrl || "", grade: GRADE || "" });
+
+function normalizeGCell(v){
+  const s = String(v ?? "").trim();
+  if(s === "1" || s === "2" || s === "3") return s;
+  // もし "g1" "g1_" みたいなのが来ても救済
+  const low = s.toLowerCase();
+  if(low.startsWith("g1")) return "1";
+  if(low.startsWith("g2")) return "2";
+  if(low.startsWith("g3")) return "3";
+  return "";
 }
 
 /** ---------------- CSV parse ----------------
- * 想定列：
- *  set,sentence,ja
- *  - ja列なし(2列)でもOK
- *  - カンマ含みはダブルクォート対応
+ * ヘッダー：g,set,sentence,ja
+ * - g列が無い旧データ（set,sentence,ja）も読める（g="" 扱い）
  */
 function parseCSV(text){
   text = String(text || "").replace(/^\uFEFF/, "");
@@ -169,17 +171,32 @@ function parseCSV(text){
   pushField(current);
   if(current.length > 1 || (current[0] ?? "").trim() !== "") rows.push(current);
 
-  // headerを捨てる
-  if(rows.length > 0) rows.shift();
+  if(rows.length > 0) rows.shift(); // header
 
   return rows
     .filter(r => r.length >= 2)
-    .map(r => ({
-      set: String(r[0] ?? "").trim(),
-      en:  String(r[1] ?? "").trim(),
-      ja:  String(r.slice(2).join(",") ?? "").trim()
-    }))
-    .filter(r => r.set && r.en);
+    .map(r => {
+      // 先頭が 1/2/3 なら g,set,sentence,ja とみなす
+      const c0 = String(r[0] ?? "").trim();
+      const isG = (c0 === "1" || c0 === "2" || c0 === "3" || /^g[123]/i.test(c0));
+      if(isG){
+        return {
+          g: normalizeGCell(r[0]),
+          set: String(r[1] ?? "").trim(),
+          en:  String(r[2] ?? "").trim(),
+          ja:  String(r.slice(3).join(",") ?? "").trim()
+        };
+      }else{
+        // 旧：set,sentence,ja
+        return {
+          g: "",
+          set: String(r[0] ?? "").trim(),
+          en:  String(r[1] ?? "").trim(),
+          ja:  String(r.slice(2).join(",") ?? "").trim()
+        };
+      }
+    })
+    .filter(x => x.set && x.en);
 }
 
 async function fetchCSVOnce(csvUrl){
@@ -190,58 +207,11 @@ async function fetchCSVOnce(csvUrl){
   return parseCSV(text);
 }
 
-function buildSetList(rows){
+function uniqueSets(rows){
   return [...new Set(rows.map(r => r.set))].sort((a,b)=>a.localeCompare(b,"ja"));
 }
 
-/** ---------------- Grade helpers ----------------
- * set命名おすすめ：
- *  g1_u01..., g2_..., g3_..., それ以外は other
- */
-function guessGradeFromSet(setName){
-  const s = (setName || "").toLowerCase();
-  if(s.startsWith("g1_") || s.startsWith("1_")) return "1";
-  if(s.startsWith("g2_") || s.startsWith("2_")) return "2";
-  if(s.startsWith("g3_") || s.startsWith("3_")) return "3";
-  return "other";
-}
-function filterSetsByGrade(setList, grade){
-  const g = (grade || "").toLowerCase();
-  if(!g || g === "all") return setList;
-  return setList.filter(s => guessGradeFromSet(s) === g);
-}
-function gradeLabel(g){
-  if(g === "1") return "1年";
-  if(g === "2") return "2年";
-  if(g === "3") return "3年";
-  if(g === "other") return "その他";
-  return "ぜんぶ";
-}
-
-/** ---------------- Time / shuffle ---------------- */
-function formatTime(ms){
-  const s = Math.floor(ms/1000);
-  const mm = String(Math.floor(s/60)).padStart(2,"0");
-  const ss = String(s%60).padStart(2,"0");
-  return `${mm}:${ss}`;
-}
-function shuffle(arr){
-  const a = [...arr];
-  for(let i=a.length-1;i>0;i--){
-    const j = Math.floor(Math.random()*(i+1));
-    [a[i],a[j]] = [a[j],a[i]];
-  }
-  return a;
-}
-function tokenize(sentence){
-  return sentence.trim().split(/\s+/);
-}
-
-/** =========================
- * UI: 生徒トップ（デフォルト）
- * - 先生設定が済んでいれば、ここから学年→セットへ
- * - まだCSVが無い場合は「先生はこちら」誘導だけ
- * ========================= */
+/** ---------------- UI: Student Home ---------------- */
 function showStudentHome(csvUrl, hasCsv){
   setRootHtml(`
     <div style="max-width:760px;margin:40px auto 0;padding:0 10px;text-align:center">
@@ -254,18 +224,19 @@ function showStudentHome(csvUrl, hasCsv){
         <div class="card">
           <div class="hint">学年をえらんでください</div>
           <div class="gradebar">
-            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"1", csv:csvUrl||""}))}'">1年</button>
-            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"2", csv:csvUrl||""}))}'">2年</button>
-            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"3", csv:csvUrl||""}))}'">3年</button>
-            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"all", csv:csvUrl||""}))}'">ぜんぶ</button>
-            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"other", csv:csvUrl||""}))}'">その他</button>
+            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({g:"1", csv:csvUrl||""}))}'">1年</button>
+            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({g:"2", csv:csvUrl||""}))}'">2年</button>
+            <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({g:"3", csv:csvUrl||""}))}'">3年</button>
+          </div>
+          <div class="small" style="margin-top:8px">
+            ※ 学年分類はスプレッドシートの <code>g</code> 列（1/2/3）で行います。
           </div>
         </div>
       ` : `
         <div class="card">
           <div class="hint">準備中</div>
           <div style="line-height:1.7">
-            先生が設定をすると、ここにセットが出ます。<br>
+            先生が設定をすると、ここに学年ボタンが出ます。<br>
             しばらく待ってね。
           </div>
         </div>
@@ -283,19 +254,15 @@ function showStudentHome(csvUrl, hasCsv){
   `);
 }
 
-/** =========================
- * UI: 先生設定画面（teacher=1）
- * - CSV URLを貼って保存
- * - 以後はその端末では生徒トップでセットが出る
- * ========================= */
+/** ---------------- UI: Teacher Setup ---------------- */
 function showTeacherSetup(csvUrl, errMsg=""){
   setRootHtml(`
     <div style="max-width:760px;margin:40px auto 0;padding:0 10px">
       <h1 style="font-size:22px;margin:0 0 10px">先生設定</h1>
       <div class="small">
-        ① スプレッドシート列：<code>set</code> / <code>sentence</code> / <code>ja</code>（jaは任意）<br>
-        ② <b>ファイル → 共有 → ウェブに公開</b> でCSVを公開<br>
-        ③ URLの最後が <code>pub?output=csv</code> のリンクを貼ってください
+        スプレッドシート列：<code>g</code> / <code>set</code> / <code>sentence</code> / <code>ja</code>（jaは任意）<br>
+        ① <b>ファイル → 共有 → ウェブに公開</b> でCSVを公開<br>
+        ② URLの最後が <code>pub?output=csv</code> のリンクを貼ってください
       </div>
 
       <div class="card">
@@ -328,12 +295,9 @@ function showTeacherSetup(csvUrl, errMsg=""){
 
   document.getElementById("btnSave").addEventListener("click", () => {
     const u = normalizeCsvUrl(input.value);
-    if(!u){
-      showWarn("CSV URLを貼ってください。");
-      return;
-    }
+    if(!u){ showWarn("CSV URLを貼ってください。"); return; }
     saveCsvToStorage(u);
-    goStudentHome(u);
+    location.href = buildUrl({ csv: u });
   });
 
   document.getElementById("btnClear").addEventListener("click", () => {
@@ -352,18 +316,19 @@ function showTeacherSetup(csvUrl, errMsg=""){
   });
 
   document.getElementById("btnBack").addEventListener("click", () => {
-    goStudentHome(normalizeCsvUrl(getCsvFromQuery() || getCsvFromStorage() || DEFAULT_CSV_URL));
+    location.href = buildUrl({ csv: normalizeCsvUrl(getCsvFromQuery() || getCsvFromStorage() || DEFAULT_CSV_URL) });
   });
 }
 
-/** =========================
- * UI: 宿題ページ（view=homework）
- * ========================= */
+/** ---------------- UI: Homework ---------------- */
 function showHomework(csvUrl){
   const base = location.origin + location.pathname;
   const items = TODAY_HOMEWORK.items.map((it, idx) => {
     const url = base + "?" + new URLSearchParams({
-      set: it.set, hw: "1", csv: csvUrl || ""
+      g: it.g || "",
+      set: it.set,
+      hw: "1",
+      csv: csvUrl || ""
     }).toString();
     return `
       <div style="border:1px solid #eee;border-radius:12px;padding:12px;text-align:left;background:#fff">
@@ -389,37 +354,20 @@ function showHomework(csvUrl){
   `);
 }
 
-/** =========================
- * UI: セット選択（gradeで絞り込み）
- * ========================= */
-function showSetSelector(csvUrl, setList){
-  const filtered = filterSetsByGrade(setList, (GRADE || "all"));
-  const title = `セットを選んでください（${gradeLabel((GRADE||"all"))}）`;
-
-  const buttons = filtered.map(s =>
-    `<button class="btnbig" onclick="location.href='${escapeHtml(buildUrl({set:s, csv:csvUrl||"", grade:GRADE||""}))}'">${escapeHtml(s)}</button>`
-  ).join("");
+/** ---------------- UI: Set selector (by g) ---------------- */
+function showSetSelector(csvUrl, rows){
+  const gg = String(G || "").trim();
+  const filtered = rows.filter(r => r.g === gg);
+  const sets = uniqueSets(filtered);
 
   setRootHtml(`
     <div style="max-width:720px;margin:40px auto 0;padding:0 16px;text-align:center">
-      <h1 style="font-size:22px;margin:0 0 12px">${escapeHtml(title)}</h1>
-
-      <div class="card">
-        <div class="hint">学年を切り替え</div>
-        <div class="gradebar">
-          <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"1", csv:csvUrl||""}))}'">1年</button>
-          <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"2", csv:csvUrl||""}))}'">2年</button>
-          <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"3", csv:csvUrl||""}))}'">3年</button>
-          <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"all", csv:csvUrl||""}))}'">ぜんぶ</button>
-          <button class="gradebtn" onclick="location.href='${escapeHtml(buildUrl({grade:"other", csv:csvUrl||""}))}'">その他</button>
-        </div>
-        <div class="small" style="margin-top:8px">
-          ※ セット名が <code>g1_</code> / <code>g2_</code> / <code>g3_</code> で始まると自動で学年分類されます。
-        </div>
-      </div>
+      <h1 style="font-size:22px;margin:0 0 12px">セットを選んでください（${escapeHtml(gLabel(gg))}）</h1>
 
       <div style="display:flex;flex-direction:column;gap:12px;margin-top:12px">
-        ${buttons || `<div class="warn">この学年に該当するセットがありません。set名を確認してください。</div>`}
+        ${sets.length ? sets.map(s =>
+          `<button class="btnbig" onclick="location.href='${escapeHtml(buildUrl({g: gg, set:s, csv:csvUrl||""}))}'">${escapeHtml(s)}</button>`
+        ).join("") : `<div class="warn">この学年にセットがありません。g列が1/2/3か確認してください。</div>`}
       </div>
 
       <div class="row" style="margin-top:18px;justify-content:center">
@@ -431,9 +379,25 @@ function showSetSelector(csvUrl, setList){
   `);
 }
 
-/** =========================
- * Game
- * ========================= */
+/** ---------------- Game ---------------- */
+function formatTime(ms){
+  const s = Math.floor(ms/1000);
+  const mm = String(Math.floor(s/60)).padStart(2,"0");
+  const ss = String(s%60).padStart(2,"0");
+  return `${mm}:${ss}`;
+}
+function shuffle(arr){
+  const a = [...arr];
+  for(let i=a.length-1;i>0;i--){
+    const j = Math.floor(Math.random()*(i+1));
+    [a[i],a[j]] = [a[j],a[i]];
+  }
+  return a;
+}
+function tokenize(sentence){
+  return sentence.trim().split(/\s+/);
+}
+
 function renderGameShell(){
   setRootHtml(`
     <h1>Word Order Game</h1>
@@ -463,7 +427,7 @@ function renderGameShell(){
 
     <div class="card">
       <div class="hint">
-        セット：<b id="setName"></b> ／ 問題 <span id="qno"></span> / <span id="qtotal"></span>
+        学年：<b id="gName"></b> ／ セット：<b id="setName"></b> ／ 問題 <span id="qno"></span> / <span id="qtotal"></span>
         <span class="pill" id="modeTag" style="display:none;margin-left:8px;">宿題</span>
       </div>
       <div class="metrics">
@@ -483,6 +447,7 @@ function startGame(csvUrl, allRows){
   const answer = document.getElementById("answer");
   const statusEl = document.getElementById("status");
   const setNameEl = document.getElementById("setName");
+  const gNameEl = document.getElementById("gName");
   const qnoEl = document.getElementById("qno");
   const qtotalEl = document.getElementById("qtotal");
   const timeEl = document.getElementById("time");
@@ -496,19 +461,26 @@ function startGame(csvUrl, allRows){
   const showWarn = (html) => { warnBox.style.display="block"; warnBox.innerHTML = html; };
   const hideWarn = () => { warnBox.style.display="none"; warnBox.innerHTML = ""; };
 
-  const QUESTIONS = allRows.filter(r => r.set === SET).map(r => ({ en:r.en, ja:r.ja }));
-
+  const gg = String(G || "").trim();
+  gNameEl.textContent = gLabel(gg);
   setNameEl.textContent = SET || "";
   modeTag.style.display = HW ? "inline-block" : "none";
+
+  // ★ g + set で絞る（混在防止）
+  const QUESTIONS = allRows
+    .filter(r => r.g === gg && r.set === SET)
+    .map(r => ({ en:r.en, ja:r.ja }));
+
   qtotalEl.textContent = String(QUESTIONS.length);
 
   if(QUESTIONS.length === 0){
-    statusEl.textContent = `セット「${SET}」が0件です`;
+    statusEl.textContent = "この条件の問題が0件です";
     statusEl.className = "status ng";
     showWarn(`
-このセットが見つかりません。
-・CSVのset列に「${escapeHtml(SET)}」があるか確認
-・追記したのに反映されない時は「公開を停止→再公開」
+条件：g=${escapeHtml(gg)} / set=${escapeHtml(SET)}
+・CSVの g 列が 1/2/3 か確認
+・set が一致しているか確認（大文字小文字も）
+・追記が反映されない時は「公開を停止→再公開」
     `.trim());
     return;
   }
@@ -613,8 +585,8 @@ function startGame(csvUrl, allRows){
         時間：<b>${escapeHtml(totalTime)}</b><br>
         ミス：<b>${escapeHtml(String(miss))}</b><br><br>
         <div class="row" style="margin-top:6px">
-          <button onclick="location.href='${escapeHtml(buildUrl({grade: GRADE||"", csv: csvUrl||""}))}'">選択画面に戻る</button>
-          <button onclick="location.href='${escapeHtml(buildUrl({set: SET, hw: HW ? "1" : "", grade: GRADE||"", csv: csvUrl||""}))}'">もう一回</button>
+          <button onclick="location.href='${escapeHtml(buildUrl({g: gg, csv: csvUrl||""}))}'">選択画面に戻る</button>
+          <button onclick="location.href='${escapeHtml(buildUrl({g: gg, set: SET, hw: HW ? "1" : "", csv: csvUrl||""}))}'">もう一回</button>
           <button onclick="location.href='${escapeHtml(buildUrl({view:"homework", csv: csvUrl||""}))}'">宿題ページ</button>
         </div>
         <div class="small" style="margin-top:8px">
@@ -629,7 +601,7 @@ function startGame(csvUrl, allRows){
   loadQuestion();
 
   document.getElementById("btnToSelector").addEventListener("click", () => {
-    location.href = buildUrl({ grade: GRADE||"all", csv: csvUrl||"" });
+    location.href = buildUrl({ g: gg, csv: csvUrl || "" });
   });
 
   document.getElementById("btnCheck").addEventListener("click", () => {
@@ -661,7 +633,6 @@ function startGame(csvUrl, allRows){
 
   document.getElementById("btnNext").addEventListener("click", () => {
     startTimerOnce();
-
     const correct = QUESTIONS[index].en.trim();
     const ans = currentAnswer();
 
@@ -680,9 +651,7 @@ function startGame(csvUrl, allRows){
   });
 }
 
-/** =========================
- * init (ルーティング)
- * ========================= */
+/** ---------------- init ---------------- */
 (async function init(){
   const csvFromQuery = normalizeCsvUrl(getCsvFromQuery());
   const csvFromLS = normalizeCsvUrl(getCsvFromStorage());
@@ -690,16 +659,12 @@ function startGame(csvUrl, allRows){
 
   // 宿題ページ
   if(VIEW === "homework"){
-    if(!csvUrl){
-      // CSVが無いなら先生設定へ誘導
-      showStudentHome("", false);
-      return;
-    }
+    if(!csvUrl){ showStudentHome("", false); return; }
     showHomework(csvUrl);
     return;
   }
 
-  // 先生モード（設定画面）
+  // 先生モード
   if(TEACHER){
     showTeacherSetup(csvUrl, "");
     return;
@@ -711,35 +676,38 @@ function startGame(csvUrl, allRows){
     return;
   }
 
-  // CSVがある → 読み込み
+  // CSV読み込み
   let rows = [];
   try{
     rows = await fetchCSVOnce(csvUrl);
   }catch(e){
-    // 先生だけは原因が分かるように teacher へ
     showTeacherSetup(csvUrl, "CSVが読み込めませんでした。\nURLや「ウェブに公開」を確認してください。\n" + (e?.message || String(e)));
     return;
   }
 
-  const setList = buildSetList(rows);
-  if(setList.length === 0){
-    showTeacherSetup(csvUrl, "CSVに問題が見つかりません。\n列（set / sentence / ja）を確認してください。");
+  if(rows.length === 0){
+    showTeacherSetup(csvUrl, "CSVに問題が見つかりません。\n列（g / set / sentence / ja）を確認してください。");
     return;
   }
 
-  // set指定がある → ゲーム
+  // ゲーム（setがある）
   if(SET){
+    if(!G){
+      // g無しでsetだけは混ざるので、必ずgを要求
+      showStudentHome(csvUrl, true);
+      return;
+    }
     startGame(csvUrl, rows);
     return;
   }
 
-  // 生徒トップ or 学年で絞ったセット選択へ
-  if(GRADE){
-    showSetSelector(csvUrl, setList);
+  // セット選択（gがある）
+  if(G){
+    showSetSelector(csvUrl, rows);
     return;
   }
 
-  // 何も指定なし → 生徒トップ（学年ボタンへ）
+  // 生徒トップ（学年ボタン）
   showStudentHome(csvUrl, true);
 })();
 </script>
