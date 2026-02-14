@@ -41,10 +41,10 @@
 <script>
 /** =========================
  * Kimi’s Classroom Tools
- * Word Order Game (Final)
+ * Word Order Game (Final + normalize check)
  * CSV columns: g,set,sentence,ja
  * - g: 1/2/3 (numbers)
- * - set: p01, test1, review... (no underscore needed)
+ * - set: p01, test1, review...
  * ========================= */
 
 /** ★先生が触るのはここだけ（任意） */
@@ -62,7 +62,7 @@ const TODAY_HOMEWORK = {
 };
 
 /** ====== ここから下は基本触らない ====== */
-const LS_KEY = "kct_wordorder_csv_v5";
+const LS_KEY = "kct_wordorder_csv_v6";
 const root = document.getElementById("root");
 const params = new URLSearchParams(location.search);
 
@@ -127,7 +127,6 @@ function gLabel(g){
 function normalizeGCell(v){
   const s = String(v ?? "").trim();
   if(s === "1" || s === "2" || s === "3") return s;
-  // もし "g1" "g1_" みたいなのが来ても救済
   const low = s.toLowerCase();
   if(low.startsWith("g1")) return "1";
   if(low.startsWith("g2")) return "2";
@@ -135,9 +134,20 @@ function normalizeGCell(v){
   return "";
 }
 
+/** ★採点用：見た目が同じなら正解にする正規化 */
+function normalizeForCheck(s){
+  return String(s || "")
+    .replace(/\u00A0/g, " ")          // NBSP → space
+    .replace(/[’‘]/g, "'")            // ’ → '
+    .replace(/[“”]/g, '"')            // “ ” → "
+    .replace(/\s+/g, " ")             // 連続スペース → 1つ
+    .trim()
+    .replace(/\s+([?.!,;:])/g, "$1"); // 記号の前の空白を消す（Tower ? → Tower?）
+}
+
 /** ---------------- CSV parse ----------------
  * ヘッダー：g,set,sentence,ja
- * - g列が無い旧データ（set,sentence,ja）も読める（g="" 扱い）
+ * - 旧データ（set,sentence,ja）も読める（g="" 扱い）
  */
 function parseCSV(text){
   text = String(text || "").replace(/^\uFEFF/, "");
@@ -176,7 +186,6 @@ function parseCSV(text){
   return rows
     .filter(r => r.length >= 2)
     .map(r => {
-      // 先頭が 1/2/3 なら g,set,sentence,ja とみなす
       const c0 = String(r[0] ?? "").trim();
       const isG = (c0 === "1" || c0 === "2" || c0 === "3" || /^g[123]/i.test(c0));
       if(isG){
@@ -187,7 +196,6 @@ function parseCSV(text){
           ja:  String(r.slice(3).join(",") ?? "").trim()
         };
       }else{
-        // 旧：set,sentence,ja
         return {
           g: "",
           set: String(r[0] ?? "").trim(),
@@ -466,7 +474,6 @@ function startGame(csvUrl, allRows){
   setNameEl.textContent = SET || "";
   modeTag.style.display = HW ? "inline-block" : "none";
 
-  // ★ g + set で絞る（混在防止）
   const QUESTIONS = allRows
     .filter(r => r.g === gg && r.set === SET)
     .map(r => ({ en:r.en, ja:r.ja }));
@@ -576,6 +583,10 @@ function startGame(csvUrl, allRows){
     return [...answer.querySelectorAll(".chip")].map(x => x.textContent).join(" ").trim();
   }
 
+  function isCorrect(ans, correct){
+    return normalizeForCheck(ans) === normalizeForCheck(correct);
+  }
+
   function showFinish(){
     stopTimer();
     const totalTime = (startAt === null) ? "00:00" : timeEl.textContent;
@@ -614,7 +625,7 @@ function startGame(csvUrl, allRows){
       return;
     }
 
-    if(ans === correct){
+    if(isCorrect(ans, correct)){
       statusEl.textContent = "正解！🎉";
       statusEl.className = "status ok";
     }else{
@@ -633,10 +644,11 @@ function startGame(csvUrl, allRows){
 
   document.getElementById("btnNext").addEventListener("click", () => {
     startTimerOnce();
+
     const correct = QUESTIONS[index].en.trim();
     const ans = currentAnswer();
 
-    if(ans === correct){
+    if(isCorrect(ans, correct)){
       done++;
       doneEl.textContent = String(done);
     }
@@ -657,26 +669,22 @@ function startGame(csvUrl, allRows){
   const csvFromLS = normalizeCsvUrl(getCsvFromStorage());
   const csvUrl = normalizeCsvUrl(csvFromQuery || csvFromLS || DEFAULT_CSV_URL);
 
-  // 宿題ページ
   if(VIEW === "homework"){
     if(!csvUrl){ showStudentHome("", false); return; }
     showHomework(csvUrl);
     return;
   }
 
-  // 先生モード
   if(TEACHER){
     showTeacherSetup(csvUrl, "");
     return;
   }
 
-  // CSVが無い → 生徒トップ（先生誘導）
   if(!csvUrl){
     showStudentHome("", false);
     return;
   }
 
-  // CSV読み込み
   let rows = [];
   try{
     rows = await fetchCSVOnce(csvUrl);
@@ -690,10 +698,8 @@ function startGame(csvUrl, allRows){
     return;
   }
 
-  // ゲーム（setがある）
   if(SET){
     if(!G){
-      // g無しでsetだけは混ざるので、必ずgを要求
       showStudentHome(csvUrl, true);
       return;
     }
@@ -701,13 +707,11 @@ function startGame(csvUrl, allRows){
     return;
   }
 
-  // セット選択（gがある）
   if(G){
     showSetSelector(csvUrl, rows);
     return;
   }
 
-  // 生徒トップ（学年ボタン）
   showStudentHome(csvUrl, true);
 })();
 </script>
